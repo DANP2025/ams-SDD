@@ -304,6 +304,30 @@ def test_swc_scatter_plot_explains_when_no_results_are_available():
     assert "No hay resultados SWC disponibles" in figure.layout.annotations[0].text
 
 
+@pytest.mark.parametrize("metric", ["Age", "Peso"])
+def test_swc_scatter_plot_excludes_age_and_weight_metrics(metric):
+    results = pd.DataFrame(
+        [
+            {
+                "metric": metric,
+                "source": "Rendimiento",
+                "availability": "Disponible",
+            }
+        ]
+    )
+
+    figure = build_swc_scatter_plot(
+        results,
+        metric,
+        "Rendimiento",
+        pd.Period("2025-12", freq="M"),
+        pd.Period("2026-01", freq="M"),
+    )
+
+    assert not figure.data
+    assert "No hay resultados SWC disponibles" in figure.layout.annotations[0].text
+
+
 def test_mbd_hopkins_calculates_change_uncertainty_and_neutral_probabilities():
     measurements = pd.DataFrame(
         [

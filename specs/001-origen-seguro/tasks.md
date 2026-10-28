@@ -16,3 +16,12 @@ La implementación y la configuración del repositorio están verificadas. La
 prueba en producción confirma el acceso autorizado y la carga actual de datos;
 queda pendiente comprobar el rechazo con una cuenta real que no figure en la
 lista autorizada, sin modificar la lista de acceso de AMS.
+
+## Validación de datos pendiente
+
+- [ ] Revisar con la persona responsable de la hoja las 99.948 filas excluidas
+  de `Plat de fuerza` (de 99.998 revisadas por el diagnóstico publicado) por
+  fecha no reconocida y categoría faltante; confirmar si son filas vacías,
+  artefactos de formato u observaciones que deben corregirse en la fuente.
+  AMS las excluye actualmente y no se deben completar ni modificar por
+  inferencia.

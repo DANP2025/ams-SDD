@@ -1354,6 +1354,7 @@ def build_swc_scatter_plot(
 ) -> go.Figure:
     plotted_results = results.loc[
         results["metric"].eq(metric)
+        & ~results["metric"].map(is_excluded_display_metric)
         & results["source"].eq(source)
         & results["availability"].eq("Disponible")
     ].copy()
@@ -2703,6 +2704,9 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
             period_data[["source", "metric"]]
             .dropna()
             .drop_duplicates()
+            .loc[
+                lambda frame: ~frame["metric"].map(is_excluded_display_metric)
+            ]
             .sort_values(["source", "metric"])
         )
         if metric_sources.empty:

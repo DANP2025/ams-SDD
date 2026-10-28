@@ -11,6 +11,7 @@
 - [x] Aumentar la tipografía, evitar etiquetas de magnitud superpuestas y habilitar zoom y desplazamiento del gráfico.
 - [x] Limitar el eje estandarizado a ±6.5 SD e indicar valores exteriores con triángulos y su valor real en el detalle.
 - [x] Evitar el solapamiento de etiquetas de puntos fuera de escala; mantener el nombre y el valor real en la información emergente.
+- [x] Excluir edad y peso del selector de variables y del constructor del gráfico.
 - [x] Mostrar un estado no disponible cuando falten datos, haya muestra insuficiente o SD sea cero.
 - [x] Añadir la advertencia de interpretación contextual y de que magnitud no equivale a beneficio.
 - [x] Añadir pruebas para valores límite, signos opuestos, datos faltantes y selección del SD de Pre.
