@@ -4,6 +4,7 @@ import pandas as pd
 from app import (
     MissingRequiredColumnsError,
     build_mbd_forest_plot,
+    build_mbd_player_matrix,
     build_z_score_matrix,
     build_z_score_radar,
     calculate_mbd_hopkins,
@@ -16,6 +17,7 @@ from app import (
     normalize_header,
     prepare_monthly_measurements,
     standardize_sheet,
+    summarize_mbd_probabilities,
     z_score_color,
     z_score_cell_style,
 )
@@ -74,10 +76,105 @@ def test_mbd_hopkins_calculates_change_uncertainty_and_neutral_probabilities():
     assert result["availability"] == "Disponible"
 
     figure = build_mbd_forest_plot(results)
-    assert figure.data[0].x[0] == pytest.approx(result["change"] / result["swc"])
-    assert figure.data[0].error_x.array[0] == pytest.approx(
-        result["ci_upper"] / result["swc"] - result["change"] / result["swc"]
+    assert figure.data[0].x[0] == pytest.approx(
+        result["change"] / result["reference_sd"]
     )
+    assert figure.layout.xaxis.title.text == (
+        "Tamaño del efecto (SD) · SWC = ±0.2"
+    )
+    assert figure.data[0].error_x.array[0] == pytest.approx(
+        result["ci_upper"] / result["reference_sd"]
+        - result["change"] / result["reference_sd"]
+    )
+    assert len(figure.layout.shapes) == 6
+    assert {
+        shape.x0
+        for shape in figure.layout.shapes
+        if shape.type == "line"
+    } == {-0.2, 0, 0.2}
+
+
+def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
+    results = pd.DataFrame(
+        [
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "source": "Rendimiento",
+                "metric": "VO2 max",
+                "change": 2.0,
+                "p_below_swc": 0.1,
+                "p_trivial": 0.2,
+                "p_above_swc": 0.7,
+                "availability": "Disponible",
+            },
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "source": "Plat de fuerza",
+                "metric": "Fuerza CMJ",
+                "change": float("nan"),
+                "p_below_swc": float("nan"),
+                "p_trivial": float("nan"),
+                "p_above_swc": float("nan"),
+                "availability": "Falta una medición Pre o Post.",
+            },
+        ]
+    )
+
+    matrix = build_mbd_player_matrix(results)
+
+    assert matrix.index.name == "JUGADOR"
+    assert matrix.columns.tolist() == [
+        ("RENDIMIENTO", "VO2 max"),
+        ("PLATAFORMA DE FUERZA", "Fuerza CMJ"),
+    ]
+    assert matrix.iloc[0, 0] == "Δ +2.0\n10% / 20% / 70%"
+    assert matrix.iloc[0, 1] == "No disponible"
+
+
+def test_mbd_probability_summary_counts_unique_most_likely_zones_and_ties():
+    results = pd.DataFrame(
+        [
+            {
+                "availability": "Disponible",
+                "p_below_swc": 0.7,
+                "p_trivial": 0.2,
+                "p_above_swc": 0.1,
+            },
+            {
+                "availability": "Disponible",
+                "p_below_swc": 0.1,
+                "p_trivial": 0.2,
+                "p_above_swc": 0.7,
+            },
+            {
+                "availability": "Disponible",
+                "p_below_swc": 0.2,
+                "p_trivial": 0.6,
+                "p_above_swc": 0.2,
+            },
+            {
+                "availability": "Disponible",
+                "p_below_swc": 0.4,
+                "p_trivial": 0.2,
+                "p_above_swc": 0.4,
+            },
+            {
+                "availability": "No disponible",
+                "p_below_swc": float("nan"),
+                "p_trivial": float("nan"),
+                "p_above_swc": float("nan"),
+            },
+        ]
+    )
+
+    assert summarize_mbd_probabilities(results) == {
+        "Menor que −SWC": 1,
+        "Dentro de ±SWC": 1,
+        "Mayor que +SWC": 1,
+        "Empate": 1,
+    }
 
 
 def test_mbd_hopkins_applies_approved_direction_and_clarity_labels():
@@ -429,6 +526,12 @@ def test_prepare_measurements_uses_latest_value_per_player_and_month():
     ].item()
     assert ana_vo2 == 50
     assert excluded_rows == 1
+    assert frame.loc[frame["metric"].eq("VO2 max"), "source"].unique().tolist() == [
+        "Rendimiento"
+    ]
+    assert frame.loc[frame["metric"].eq("Fuerza"), "source"].unique().tolist() == [
+        "Plat de fuerza"
+    ]
     assert diagnostics["Rendimiento"] == {
         "rows": 4,
         "excluded": 1,

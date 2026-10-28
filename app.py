@@ -651,9 +651,18 @@ def prepare_monthly_measurements(
             )
             .dropna(subset=["value"])
         )
+        grouped["source"] = worksheet_name
         measurement_frames.append(grouped)
 
-    columns = ["player_id", "player_name", "date", "category", "metric", "value"]
+    columns = [
+        "player_id",
+        "player_name",
+        "date",
+        "category",
+        "source",
+        "metric",
+        "value",
+    ]
     excluded_rows = sum(
         values["excluded"] for values in diagnostics.values()
     )
@@ -665,7 +674,7 @@ def prepare_monthly_measurements(
     measurements = (
         measurements.sort_values("date")
         .drop_duplicates(
-            ["player_id", "category", "metric", "_month"],
+            ["player_id", "category", "source", "metric", "_month"],
             keep="last",
         )
         .drop(columns="_month")
@@ -738,6 +747,7 @@ def calculate_mbd_hopkins(
     columns = [
         "player_id",
         "player_name",
+        "source",
         "metric",
         "pre_value",
         "post_value",
@@ -777,33 +787,40 @@ def calculate_mbd_hopkins(
         )
 
     data = measurements.copy()
+    if "source" not in data:
+        data["source"] = "Mediciones"
     data["player_id"] = data["player_id"].astype("string")
     data["_month"] = data["date"].dt.to_period("M")
     relevant = data.loc[
         data["category"].eq(category)
         & data["_month"].isin([pre_month, post_month])
     ]
-    metrics = sorted(relevant["metric"].dropna().unique())
-    if not metrics:
+    metric_sources = (
+        relevant[["source", "metric"]]
+        .dropna()
+        .drop_duplicates()
+        .sort_values(["source", "metric"])
+    )
+    if metric_sources.empty:
         return pd.DataFrame(columns=columns)
 
     reference = relevant.loc[
         relevant["_month"].eq(pre_month)
-    ].groupby("metric")["value"].agg(["count", "std"])
+    ].groupby(["source", "metric"])["value"].agg(["count", "std"])
     player_values = (
         relevant.loc[
             relevant["player_id"].isin(selected_player_ids)
         ]
-        .groupby(["player_id", "metric", "_month"], as_index=False)
+        .groupby(["source", "player_id", "metric", "_month"], as_index=False)
         .agg(
             value=("value", "mean"),
             player_name=("player_name", "first"),
         )
     )
     value_lookup = {
-        (player_id, metric, month): value
-        for player_id, metric, month, value in player_values[
-            ["player_id", "metric", "_month", "value"]
+        (source, player_id, metric, month): value
+        for source, player_id, metric, month, value in player_values[
+            ["source", "player_id", "metric", "_month", "value"]
         ].itertuples(index=False, name=None)
     }
     name_lookup = (
@@ -816,12 +833,17 @@ def calculate_mbd_hopkins(
     for player_id in selected_player_ids:
         player_id = str(player_id)
         player_name = name_lookup.get(player_id, "Jugador sin nombre")
-        for metric in metrics:
-            pre_value = value_lookup.get((player_id, metric, pre_month))
-            post_value = value_lookup.get((player_id, metric, post_month))
-            if metric in reference.index:
-                reference_n = int(reference.loc[metric, "count"])
-                reference_sd = float(reference.loc[metric, "std"])
+        for source, metric in metric_sources.itertuples(index=False, name=None):
+            pre_value = value_lookup.get(
+                (source, player_id, metric, pre_month)
+            )
+            post_value = value_lookup.get(
+                (source, player_id, metric, post_month)
+            )
+            reference_key = (source, metric)
+            if reference_key in reference.index:
+                reference_n = int(reference.loc[reference_key, "count"])
+                reference_sd = float(reference.loc[reference_key, "std"])
             else:
                 reference_n = 0
                 reference_sd = float("nan")
@@ -829,6 +851,7 @@ def calculate_mbd_hopkins(
             row = {
                 "player_id": player_id,
                 "player_name": player_name,
+                "source": source,
                 "metric": metric,
                 "pre_value": pre_value,
                 "post_value": post_value,
@@ -933,13 +956,17 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         & results["ci_upper"].notna()
         & results["swc"].gt(0)
     ].copy()
-    valid_results["_effect"] = valid_results["change"] / valid_results["swc"]
-    valid_results["_lower"] = valid_results["ci_lower"] / valid_results["swc"]
-    valid_results["_upper"] = valid_results["ci_upper"] / valid_results["swc"]
+    valid_results["_effect"] = (
+        valid_results["change"] / valid_results["reference_sd"]
+    )
+    valid_results["_lower"] = (
+        valid_results["ci_lower"] / valid_results["reference_sd"]
+    )
+    valid_results["_upper"] = (
+        valid_results["ci_upper"] / valid_results["reference_sd"]
+    )
     valid_results["_label"] = (
-        valid_results["player_name"].astype(str)
-        + " · "
-        + valid_results["metric"].astype(str)
+        valid_results["metric"].astype(str)
     )
     if valid_results.empty:
         figure = go.Figure()
@@ -954,33 +981,37 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         )
         return figure
 
-    x_min = min(-1.25, float(valid_results["_lower"].min()) - 0.25)
-    x_max = max(1.25, float(valid_results["_upper"].max()) + 0.25)
+    data_min = float(valid_results["_lower"].min())
+    data_max = float(valid_results["_upper"].max())
+    span = max(data_max - data_min, 0.5)
+    x_min = min(-0.5, data_min - span * 0.08)
+    x_max = max(0.5, data_max + span * 0.34)
+    label_x = data_max + span * 0.04
     figure = go.Figure()
     figure.add_vrect(
         x0=x_min,
-        x1=-1,
-        fillcolor="rgba(39, 78, 123, 0.06)",
+        x1=-0.2,
+        fillcolor="rgba(39, 78, 123, 0.07)",
         line_width=0,
         layer="below",
     )
     figure.add_vrect(
-        x0=-1,
-        x1=1,
-        fillcolor="rgba(100, 116, 139, 0.12)",
+        x0=-0.2,
+        x1=0.2,
+        fillcolor="rgba(100, 116, 139, 0.11)",
         line_width=0,
         layer="below",
     )
     figure.add_vrect(
-        x0=1,
+        x0=0.2,
         x1=x_max,
-        fillcolor="rgba(39, 78, 123, 0.06)",
+        fillcolor="rgba(39, 78, 123, 0.07)",
         line_width=0,
         layer="below",
     )
     figure.add_vline(x=0, line_color="#64748b", line_dash="dash")
-    figure.add_vline(x=-1, line_color="#9aa7b8", line_dash="dot")
-    figure.add_vline(x=1, line_color="#9aa7b8", line_dash="dot")
+    figure.add_vline(x=-0.2, line_color="#9aa7b8", line_dash="dot")
+    figure.add_vline(x=0.2, line_color="#9aa7b8", line_dash="dot")
     figure.add_trace(
         go.Scatter(
             x=valid_results["_effect"],
@@ -997,15 +1028,38 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
                 "width": 4,
             },
             customdata=valid_results[
-                ["change", "ci_lower", "ci_upper", "swc"]
+                [
+                    "change",
+                    "ci_lower",
+                    "ci_upper",
+                    "p_below_swc",
+                    "p_trivial",
+                    "p_above_swc",
+                ]
             ],
             hovertemplate=(
-                "%{y}<br>Cambio: %{customdata[0]:.1f}"
+                "%{y}<br>Tamaño del efecto: %{x:.2f} SD"
+                "<br>Cambio: %{customdata[0]:.1f}"
                 "<br>IC 95%: %{customdata[1]:.1f} a %{customdata[2]:.1f}"
-                "<br>SWC: %{customdata[3]:.1f}<extra></extra>"
+                "<br>Probabilidades &lt; −SWC / trivial / &gt; +SWC: "
+                "%{customdata[3]:.0%} / %{customdata[4]:.0%} / "
+                "%{customdata[5]:.0%}<extra></extra>"
             ),
         )
     )
+    for _, row in valid_results.iterrows():
+        figure.add_annotation(
+            x=label_x,
+            y=row["_label"],
+            text=(
+                f"{row['p_below_swc']:.0%} menor · "
+                f"{row['p_trivial']:.0%} trivial · "
+                f"{row['p_above_swc']:.0%} mayor"
+            ),
+            xanchor="left",
+            showarrow=False,
+            font={"size": 10, "color": "#64748b"},
+        )
     figure.update_layout(
         template="plotly_white",
         font={
@@ -1015,17 +1069,89 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis={
-            "title": "Cambio expresado en múltiplos de SWC",
+            "title": "Tamaño del efecto (SD) · SWC = ±0.2",
             "range": [x_min, x_max],
             "zeroline": False,
             "gridcolor": "#e5e7eb",
         },
         yaxis={"autorange": "reversed", "gridcolor": "#e5e7eb"},
         showlegend=False,
-        margin={"t": 20, "b": 60, "l": 180, "r": 30},
+        margin={"t": 20, "b": 60, "l": 115, "r": 165},
         height=max(320, min(850, 90 + 42 * len(valid_results))),
     )
     return figure
+
+
+def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
+    data = results.copy()
+    data["cell"] = data.apply(
+        lambda row: (
+            "No disponible"
+            if row["availability"] != "Disponible"
+            else (
+                f"Δ {row['change']:+.1f}\n"
+                f"{row['p_below_swc']:.0%} / "
+                f"{row['p_trivial']:.0%} / "
+                f"{row['p_above_swc']:.0%}"
+            )
+        ),
+        axis=1,
+    )
+    matrix = data.pivot(
+        index="player_name",
+        columns=["source", "metric"],
+        values="cell",
+    )
+    source_labels = {
+        "Rendimiento": "RENDIMIENTO",
+        "Plat de fuerza": "PLATAFORMA DE FUERZA",
+        "Mediciones": "MEDICIONES",
+    }
+    matrix.columns = pd.MultiIndex.from_tuples(
+        [
+            (source_labels.get(str(source), str(source).upper()), str(metric))
+            for source, metric in matrix.columns
+        ]
+    )
+    source_order = {
+        "RENDIMIENTO": 0,
+        "PLATAFORMA DE FUERZA": 1,
+        "MEDICIONES": 2,
+    }
+    matrix = matrix.reindex(
+        columns=sorted(
+            matrix.columns,
+            key=lambda column: (
+                source_order.get(column[0], 3),
+                column[0],
+                column[1],
+            ),
+        )
+    )
+    matrix.index.name = "JUGADOR"
+    return matrix
+
+
+def summarize_mbd_probabilities(results: pd.DataFrame) -> dict[str, int]:
+    probability_columns = ["p_below_swc", "p_trivial", "p_above_swc"]
+    probabilities = results.loc[
+        results["availability"].eq("Disponible"), probability_columns
+    ].dropna()
+    labels = ["Menor que −SWC", "Dentro de ±SWC", "Mayor que +SWC"]
+    summary = {label: 0 for label in labels}
+    summary["Empate"] = 0
+    for row in probabilities.itertuples(index=False, name=None):
+        highest = max(row)
+        winners = [
+            index
+            for index, probability in enumerate(row)
+            if probability == highest
+        ]
+        if len(winners) == 1:
+            summary[labels[winners[0]]] += 1
+        else:
+            summary["Empate"] += 1
+    return summary
 
 
 def calculate_z_scores(
@@ -1059,7 +1185,13 @@ def calculate_z_scores(
         ]
     reference_rows = measurements.loc[
         measurements["category"].eq(reference_category)
-    ]
+    ].copy()
+    if "date" in reference_rows:
+        reference_rows["_month"] = reference_rows["date"].dt.to_period("M")
+        reference_rows = reference_rows.sort_values("date").drop_duplicates(
+            ["player_id", "category", "metric", "_month"],
+            keep="last",
+        )
     target_names = (
         target_rows
         .drop_duplicates("player_id")
@@ -1261,29 +1393,47 @@ def require_authorized_user(app_config: Mapping[str, object]) -> None:
 
 def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
     st.markdown(
-        '<div class="ams-section-heading">Cambio e incertidumbre</div>'
-        '<div class="ams-section-copy">'
-        "Compara mediciones Pre y Post con la categoría seleccionada como "
-        "referencia."
-        "</div>",
+        """
+        <style>
+        .ams-mbd-title {
+            color: #17212b;
+            font-size: 1.8rem;
+            font-weight: 750;
+            letter-spacing: -0.035em;
+            margin: 0 0 .25rem;
+        }
+        .ams-mbd-subtitle {
+            color: #64748b;
+            font-size: .88rem;
+            margin: 0 0 1.25rem;
+        }
+        .ams-mbd-summary {
+            background: #f3f6fa;
+            border: 1px solid #e3e9f1;
+            border-radius: .75rem;
+            margin-bottom: .6rem;
+            padding: .8rem 1rem;
+        }
+        .ams-mbd-summary-label {
+            color: #64748b;
+            font-size: .75rem;
+            font-weight: 600;
+            letter-spacing: .03em;
+        }
+        .ams-mbd-summary-value {
+            color: #17212b;
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-top: .2rem;
+        }
+        </style>
+        <div class="ams-mbd-title">📈 MBD — Magnitud Basada en Decisiones</div>
+        <div class="ams-mbd-subtitle">
+        Metodología Will Hopkins · SWC = 0.2 × SD Pre · TE con ICC = 0.90
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-    st.info(
-        f"El modelo usa ICC fijo de {MBD_ICC:.2f}, una distribución normal y la "
-        "desviación estándar muestral de la categoría en Pre. Los resultados "
-        "son apoyo al análisis profesional; no son un diagnóstico."
-    )
-    st.caption(
-        "Las etiquetas de beneficio o perjuicio solo se activan para variables "
-        "con dirección deseable respaldada por literatura y aprobada para AMS. "
-        "Las demás variables se muestran de forma neutral."
-    )
-    if not MBD_DIRECTIONS:
-        st.caption(
-            "En esta versión aún no hay variables con dirección aprobada; "
-            "las probabilidades se muestran por debajo, dentro y por encima "
-            "del SWC."
-        )
     if measurements.empty:
         st.warning("No hay mediciones válidas disponibles para el análisis MBD.")
         return
@@ -1293,79 +1443,85 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
         st.warning("No hay categorías disponibles para analizar.")
         return
 
-    category = st.selectbox("Categoría", categories, key="mbd_category")
-    category_data = measurements.loc[
-        measurements["category"].astype(str).eq(category)
-    ]
-    periods = sorted(
-        category_data["date"].dt.to_period("M").dropna().unique()
-    )
-    if len(periods) < 2:
-        st.warning(
-            "Se necesitan al menos dos periodos mensuales con mediciones en "
-            "esta categoría."
+    with st.container(border=True):
+        filter_columns = st.columns([1.05, 1.8, 0.55, 1, 1], gap="small")
+        with filter_columns[0]:
+            category = st.selectbox(
+                "Categoría", categories, key="mbd_category"
+            )
+        category_data = measurements.loc[
+            measurements["category"].astype(str).eq(category)
+        ]
+        periods = sorted(
+            category_data["date"].dt.to_period("M").dropna().unique()
         )
-        return
+        if len(periods) < 2:
+            st.warning(
+                "Se necesitan al menos dos periodos mensuales con mediciones "
+                "en esta categoría."
+            )
+            return
 
-    pre_default = periods[-2]
-    post_default = periods[-1]
-    for key, default_period in (
-        ("mbd_pre_month", pre_default),
-        ("mbd_post_month", post_default),
-    ):
-        if st.session_state.get(key) not in periods:
-            st.session_state[key] = default_period
+        pre_default = periods[-2]
+        post_default = periods[-1]
+        for key, default_period in (
+            ("mbd_pre_month", pre_default),
+            ("mbd_post_month", post_default),
+        ):
+            if st.session_state.get(key) not in periods:
+                st.session_state[key] = default_period
 
-    period_columns = st.columns(2, gap="medium")
-    with period_columns[0]:
-        pre_month = st.selectbox(
-            "Periodo Pre",
-            periods,
-            format_func=lambda period: period.strftime("%Y-%m"),
-            key="mbd_pre_month",
+        player_options = (
+            category_data[["player_id", "player_name"]]
+            .drop_duplicates("player_id")
+            .sort_values("player_name")
         )
-    with period_columns[1]:
-        post_month = st.selectbox(
-            "Periodo Post",
-            periods,
-            format_func=lambda period: period.strftime("%Y-%m"),
-            key="mbd_post_month",
+        player_ids = player_options["player_id"].astype(str).tolist()
+        player_names = dict(
+            zip(player_ids, player_options["player_name"].astype(str))
         )
-
-    player_options = (
-        category_data[["player_id", "player_name"]]
-        .drop_duplicates("player_id")
-        .sort_values("player_name")
-    )
-    player_ids = player_options["player_id"].astype(str).tolist()
-    player_names = dict(
-        zip(player_ids, player_options["player_name"].astype(str))
-    )
-    current_selection = st.session_state.get("mbd_selected_player_ids", [])
-    st.session_state["mbd_selected_player_ids"] = [
-        player_id for player_id in current_selection if player_id in player_ids
-    ]
-    player_columns = st.columns([4, 1], gap="medium")
-    with player_columns[0]:
-        selected_player_ids = st.multiselect(
-            "Jugadores",
-            player_ids,
-            format_func=lambda player_id: player_names.get(
-                player_id, str(player_id)
-            ),
-            key="mbd_selected_player_ids",
-            placeholder="Selecciona uno o varios jugadores",
+        current_selection = st.session_state.get(
+            "mbd_selected_player_ids", []
         )
-    with player_columns[1]:
-        st.caption(" ")
-        st.button(
-            "Todos",
-            key="mbd_select_all_players",
-            help="Seleccionar todos los jugadores de esta categoría.",
-            on_click=_select_all_mbd_players,
-            args=(player_ids,),
-            use_container_width=True,
-        )
+        st.session_state["mbd_selected_player_ids"] = [
+            player_id
+            for player_id in current_selection
+            if player_id in player_ids
+        ]
+        with filter_columns[1]:
+            selected_player_ids = st.multiselect(
+                "Jugadores",
+                player_ids,
+                format_func=lambda player_id: player_names.get(
+                    player_id, str(player_id)
+                ),
+                key="mbd_selected_player_ids",
+                placeholder="Selecciona uno o varios jugadores",
+            )
+        with filter_columns[2]:
+            st.caption(" ")
+            st.button(
+                "Todos",
+                key="mbd_select_all_players",
+                help="Seleccionar todos los jugadores de esta categoría.",
+                on_click=_select_all_mbd_players,
+                args=(player_ids,),
+                use_container_width=True,
+            )
+        with filter_columns[3]:
+            pre_month = st.selectbox(
+                "Mes Pre",
+                periods,
+                format_func=lambda period: period.strftime("%Y-%m"),
+                key="mbd_pre_month",
+            )
+        with filter_columns[4]:
+            post_month = st.selectbox(
+                "Mes Post",
+                periods,
+                format_func=lambda period: period.strftime("%Y-%m"),
+                key="mbd_post_month",
+            )
 
     if pre_month == post_month:
         st.warning("Selecciona meses distintos para los periodos Pre y Post.")
@@ -1385,120 +1541,189 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
         st.info("No hay variables compartidas entre los periodos seleccionados.")
         return
 
-    summary = st.columns(3, gap="medium")
-    summary[0].metric("Jugadores seleccionados", str(len(selected_player_ids)))
-    summary[1].metric("Variables", str(results["metric"].nunique()))
-    summary[2].metric(
-        "Resultados disponibles",
-        str(results["availability"].eq("Disponible").sum()),
+    forest_player_id = st.selectbox(
+        "Ver Forest Plot de",
+        selected_player_ids,
+        format_func=lambda player_id: player_names.get(
+            player_id, str(player_id)
+        ),
+        key="mbd_forest_player_id",
     )
+    st.markdown("**Resultados por jugador y variable**")
+    st.caption("Cambio · Probabilidad < −SWC / trivial / > +SWC")
+    matrix = build_mbd_player_matrix(results)
+    styled_matrix = (
+        matrix.style.set_properties(
+            **{
+                "background-color": "#EAF1F8",
+                "color": "#17212B",
+                "font-weight": "600",
+                "text-align": "center",
+                "white-space": "pre-wrap",
+                "border": "1px solid #D9E2EC",
+                "min-width": "92px",
+            }
+        )
+        .map(
+            lambda value: (
+                "background-color: #F1F4F8; color: #64748B;"
+                if value == "No disponible"
+                else ""
+            )
+        )
+        .set_table_styles(
+            [
+                {
+                    "selector": "th",
+                    "props": [
+                        ("background-color", "#F5F8FC"),
+                        ("color", "#334155"),
+                        ("font-weight", "700"),
+                        ("text-align", "center"),
+                    ],
+                },
+                {
+                    "selector": "th.level0",
+                    "props": [
+                        ("background-color", "#DCE9F6"),
+                        ("color", "#274E7B"),
+                    ],
+                },
+            ]
+        )
+    )
+    with st.container(border=True):
+        st.dataframe(
+            styled_matrix,
+            use_container_width=True,
+            height=min(620, max(155, 78 + 62 * len(matrix))),
+        )
 
-    display_columns = [
-        "player_name",
-        "metric",
-        "pre_value",
-        "post_value",
-        "change",
-        "reference_sd",
-        "swc",
-        "effect_size",
-        "typical_error",
-        "se_change",
-        "ci_lower",
-        "ci_upper",
-        "p_below_swc",
-        "p_trivial",
-        "p_above_swc",
+    forest_results = results.loc[
+        results["player_id"].astype(str).eq(str(forest_player_id))
     ]
-    if results["p_benefit"].notna().any():
-        display_columns.extend(["p_benefit", "p_harm"])
-    display_columns.extend(["direction", "certainty", "clarity", "availability"])
-    display_results = results[display_columns].rename(
-        columns={
-            "player_name": "Jugador",
-            "metric": "Variable",
-            "pre_value": "Pre",
-            "post_value": "Post",
-            "change": "Cambio",
-            "reference_sd": "SD Pre (ref.)",
-            "swc": "SWC",
-            "effect_size": "Tamaño del efecto",
-            "typical_error": "TE",
-            "se_change": "SE del cambio",
-            "ci_lower": "IC 95% inferior",
-            "ci_upper": "IC 95% superior",
-            "p_below_swc": "P < -SWC (%)",
-            "p_trivial": "P trivial (%)",
-            "p_above_swc": "P > +SWC (%)",
-            "p_benefit": "P beneficio (%)",
-            "p_harm": "P perjuicio (%)",
-            "direction": "Dirección",
-            "certainty": "Certeza",
-            "clarity": "Claridad",
-            "availability": "Disponibilidad",
-        }
-    )
-    probability_columns = [
-        "P < -SWC (%)",
-        "P trivial (%)",
-        "P > +SWC (%)",
+    available_results = forest_results.loc[
+        forest_results["availability"].eq("Disponible")
     ]
-    if "P beneficio (%)" in display_results:
-        probability_columns.extend(["P beneficio (%)", "P perjuicio (%)"])
-    for column in probability_columns:
-        display_results[column] = display_results[column] * 100
-
-    number_columns = (
-        "Pre",
-        "Post",
-        "Cambio",
-        "SD Pre (ref.)",
-        "SWC",
-        "Tamaño del efecto",
-        "TE",
-        "SE del cambio",
-        "IC 95% inferior",
-        "IC 95% superior",
+    st.markdown(
+        f"**Forest Plot MBD · {player_names.get(forest_player_id, str(forest_player_id))}"
+        f" · {pre_month.strftime('%Y-%m')} → {post_month.strftime('%Y-%m')}**"
     )
-    number_columns = (*number_columns, *probability_columns)
-    st.dataframe(
-        display_results,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            column: st.column_config.NumberColumn(format="%.1f")
-            for column in number_columns
-        },
-        height=min(800, max(180, 42 + 35 * len(display_results))),
-    )
-    st.caption(
-        "Las probabilidades neutrales se refieren a un cambio menor que "
-        "−SWC, dentro de ±SWC o mayor que +SWC. Las probabilidades y los "
-        "intervalos dependen de los supuestos del modelo."
-    )
-
-    available_results = results.loc[
-        results["availability"].eq("Disponible")
-    ]
     if available_results.empty:
         st.info(
-            "No se puede dibujar el Forest Plot: faltan mediciones, una muestra "
-            "Pre suficiente o variabilidad en la referencia."
+            "No hay intervalos disponibles para este jugador en el periodo "
+            "seleccionado."
         )
-    else:
-        st.markdown(
-            '<div class="ams-section-heading">Forest Plot</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "El gráfico usa los mismos límites del intervalo del 95% que la "
-            "tabla, expresados como múltiplos de SWC. Las zonas son neutrales "
-            "mientras no haya una dirección deseable aprobada."
-        )
+        return
+
+    summary = summarize_mbd_probabilities(available_results)
+    variable_count = len(available_results)
+    plot_column, summary_column = st.columns([2.5, 1], gap="medium")
+    with plot_column:
         st.plotly_chart(
             build_mbd_forest_plot(available_results),
             use_container_width=True,
             config={"displayModeBar": False},
+        )
+    with summary_column:
+        st.markdown("**Resumen de probabilidades**")
+        for label, color in (
+            ("Menor que −SWC", "#274E7B"),
+            ("Dentro de ±SWC", "#64748B"),
+            ("Mayor que +SWC", "#274E7B"),
+        ):
+            count = summary[label]
+            percentage = count / variable_count * 100
+            st.markdown(
+                f"""
+                <div class="ams-mbd-summary">
+                  <div class="ams-mbd-summary-label" style="color:{color}">
+                    {label}
+                  </div>
+                  <div class="ams-mbd-summary-value">
+                    {count} <span style="font-size:.85rem;color:#64748b">
+                    ({percentage:.0f}% de variables)</span>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        if summary["Empate"]:
+            st.caption(
+                f"{summary['Empate']} variable(s) tienen probabilidades "
+                "empatadas entre zonas."
+            )
+
+    with st.expander("Ver cálculos detallados"):
+        detail_columns = [
+            "player_name",
+            "source",
+            "metric",
+            "pre_value",
+            "post_value",
+            "change",
+            "reference_sd",
+            "swc",
+            "effect_size",
+            "typical_error",
+            "se_change",
+            "ci_lower",
+            "ci_upper",
+            "p_below_swc",
+            "p_trivial",
+            "p_above_swc",
+            "availability",
+        ]
+        detail_results = results[detail_columns].rename(
+            columns={
+                "player_name": "Jugador",
+                "source": "Origen",
+                "metric": "Variable",
+                "pre_value": "Pre",
+                "post_value": "Post",
+                "change": "Cambio",
+                "reference_sd": "SD Pre",
+                "swc": "SWC",
+                "effect_size": "Tamaño del efecto",
+                "typical_error": "TE",
+                "se_change": "SE del cambio",
+                "ci_lower": "IC 95% inferior",
+                "ci_upper": "IC 95% superior",
+                "p_below_swc": "P < -SWC (%)",
+                "p_trivial": "P trivial (%)",
+                "p_above_swc": "P > +SWC (%)",
+                "availability": "Disponibilidad",
+            }
+        )
+        for column in (
+            "P < -SWC (%)",
+            "P trivial (%)",
+            "P > +SWC (%)",
+        ):
+            detail_results[column] = detail_results[column] * 100
+        detail_number_columns = (
+            "Pre",
+            "Post",
+            "Cambio",
+            "SD Pre",
+            "SWC",
+            "Tamaño del efecto",
+            "TE",
+            "SE del cambio",
+            "IC 95% inferior",
+            "IC 95% superior",
+            "P < -SWC (%)",
+            "P trivial (%)",
+            "P > +SWC (%)",
+        )
+        st.dataframe(
+            detail_results,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                column: st.column_config.NumberColumn(format="%.1f")
+                for column in detail_number_columns
+            },
         )
 
 
