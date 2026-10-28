@@ -23,12 +23,12 @@
 
 ## Criterios de aceptación
 
-- [ ] Los filtros de mes, año, categoría de jugadores, jugadores y categoría de referencia controlan el conjunto de datos usado.
-- [ ] Para mediciones repetidas de un jugador en el mismo mes se usa la fecha más reciente.
-- [ ] La media y la desviación de referencia usan observaciones válidas del mismo mes y categoría.
-- [ ] Los ceros de la referencia no participan y se requieren al menos dos observaciones válidas.
-- [ ] Una desviación estándar igual a cero o datos insuficientes producen un resultado no disponible, nunca cero.
-- [ ] Tabla y radar coinciden en los valores y clasificación de Z-Score.
-- [ ] Los límites de clasificación se aplican correctamente, incluidos `Z = 2`, `Z = -0.5` y `Z = -1`.
-- [ ] La interfaz advierte que “por encima de la media” no significa automáticamente “mejor”.
-- [ ] El DNI no se muestra en etiquetas ni resultados visibles.
+- [x] Los filtros de mes, año, categoría de jugadores, jugadores y categoría de referencia controlan el conjunto de datos usado.
+- [x] Para mediciones repetidas de un jugador en el mismo mes se usa la fecha más reciente.
+- [x] La media y la desviación de referencia usan observaciones válidas del mismo mes y categoría.
+- [x] Los ceros de la referencia no participan y se requieren al menos dos observaciones válidas.
+- [x] Una desviación estándar igual a cero o datos insuficientes producen un resultado no disponible, nunca cero.
+- [x] Tabla y radar coinciden en los valores y clasificación de Z-Score.
+- [x] Los límites de clasificación se aplican correctamente, incluidos `Z = 2`, `Z = -0.5` y `Z = -1`.
+- [x] La interfaz advierte que “por encima de la media” no significa automáticamente “mejor”.
+- [x] El DNI no se muestra en etiquetas ni resultados visibles.

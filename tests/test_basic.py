@@ -240,7 +240,7 @@ def test_swc_scatter_plot_shows_all_players_with_neutral_magnitude_zones():
         "Ana Maria Gonzalez",
         "Beto Dos",
         "Caro Tres",
-        "Dora Cuatro",
+        "",
     ]
     assert list(trace.marker.color) == [
         "#16a34a",
@@ -249,8 +249,9 @@ def test_swc_scatter_plot_shows_all_players_with_neutral_magnitude_zones():
         "#16a34a",
     ]
     assert list(trace.marker.symbol) == ["circle", "circle", "circle", "triangle-up"]
-    assert trace.textposition[3] == "bottom center"
     assert trace.customdata[3][6] == 10.0
+    assert trace.customdata[3][7] == "Dora Cuatro"
+    assert "%{customdata[7]}" in trace.hovertemplate
     assert figure.layout.yaxis.range == (-6.5, 6.5)
     assert figure.layout.title.font.size == 19
     assert figure.layout.xaxis.tickfont.size == 12

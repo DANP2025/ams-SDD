@@ -24,11 +24,11 @@
 
 ## Criterios de aceptación
 
-- [ ] Cambio, SWC, tamaño del efecto, TE, error estándar e intervalo del 95% coinciden con las fórmulas de esta especificación.
-- [ ] Las probabilidades de beneficio, perjuicio y trivialidad se calculan alrededor de los umbrales SWC.
-- [ ] Las etiquetas de dirección se muestran solo para variables con dirección aprobada y documentada.
-- [ ] Variables sin dirección documentada presentan resultados neutrales sin etiquetado de beneficio/perjuicio.
-- [ ] Tabla y gráfico muestran el mismo intervalo del 95%.
-- [ ] Se aplica correctamente `CLARO`/`NO CLARO` y los umbrales de certeza.
-- [ ] Datos ausentes, muestra insuficiente o desviación estándar cero no generan resultados ficticios.
-- [ ] La interfaz presenta los supuestos del modelo y no comunica un diagnóstico.
+- [x] Cambio, SWC, tamaño del efecto, TE, error estándar e intervalo del 95% coinciden con las fórmulas de esta especificación.
+- [x] Las probabilidades de beneficio, perjuicio y trivialidad se calculan alrededor de los umbrales SWC.
+- [ ] Las etiquetas de dirección se muestran solo para variables con dirección aprobada y documentada. (La aplicación restringe los rótulos al catálogo; falta aprobación del protocolo y catálogo por el equipo de AMS.)
+- [x] Variables sin dirección documentada presentan resultados neutrales sin etiquetado de beneficio/perjuicio.
+- [x] Tabla y gráfico muestran el mismo intervalo del 95%.
+- [x] Se aplica correctamente `CLARO`/`NO CLARO` y los umbrales de certeza.
+- [x] Datos ausentes, muestra insuficiente o desviación estándar cero no generan resultados ficticios.
+- [x] La interfaz presenta los supuestos del modelo y no comunica un diagnóstico.

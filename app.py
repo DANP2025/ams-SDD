@@ -1429,12 +1429,13 @@ def build_swc_scatter_plot(
         else "circle"
         for effect in plotted_results["effect_size"]
     ]
+    visible_labels = plotted_results["effect_size"].abs().le(axis_limit)
     text_positions = []
     for index, effect in enumerate(plotted_results["effect_size"]):
         if effect > axis_limit:
-            text_positions.append("bottom center")
-        elif effect < -axis_limit:
             text_positions.append("top center")
+        elif effect < -axis_limit:
+            text_positions.append("bottom center")
         else:
             text_positions.append(
                 ("top center", "bottom center", "middle left", "middle right")[
@@ -1446,7 +1447,7 @@ def build_swc_scatter_plot(
             x=plotted_results["post_value"],
             y=plotted_results["_plot_effect"],
             mode="markers+text",
-            text=plotted_results["player_name"],
+            text=plotted_results["player_name"].where(visible_labels, ""),
             textposition=text_positions,
             textfont={"size": 12, "color": "#1e293b"},
             marker={
@@ -1464,10 +1465,11 @@ def build_swc_scatter_plot(
                     "swc",
                     "magnitude",
                     "effect_size",
+                    "player_name",
                 ]
             ],
             hovertemplate=(
-                "<b>%{text}</b><br>"
+                "<b>%{customdata[7]}</b><br>"
                 "Pre: %{customdata[0]:.1f}<br>"
                 "Post: %{customdata[1]:.1f}<br>"
                 "Cambio: %{customdata[2]:+.1f}<br>"
@@ -2783,8 +2785,8 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
         "perjuicio. Las franjas indican magnitud estandarizada: pequeño "
         "(0.2–0.6), moderado (0.6–1.2) y grande (≥1.2 SD). Usa la barra "
         "del gráfico o la rueda del ratón para explorar los puntos. Los "
-        "triángulos indican valores fuera de ±6.5 SD; el valor real aparece "
-        "al pasar el cursor."
+        "triángulos indican valores fuera de ±6.5 SD; sus nombres y valores "
+        "reales aparecen al pasar el cursor."
     )
     st.plotly_chart(
         build_swc_scatter_plot(

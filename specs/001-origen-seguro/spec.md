@@ -24,13 +24,13 @@
 
 ## Criterios de aceptación
 
-- [ ] Una cuenta que no figure en la lista autorizada no puede ver ni cargar datos.
-- [ ] El sistema accede únicamente a la hoja privada configurada y a las tres pestañas esperadas.
-- [ ] Variaciones de mayúsculas, tildes y separadores no impiden reconocer encabezados conocidos.
-- [ ] Una métrica nueva se conserva como columna disponible.
-- [ ] Un campo estructural desconocido presenta una asignación seleccionable y esta dura solo la sesión actual.
-- [ ] Una pestaña o campo obligatorio faltante bloquea el análisis y produce un mensaje claro.
-- [ ] Las filas sin jugador o fecha quedan fuera del cálculo y se informa su cantidad.
-- [ ] Los cambios de datos se reflejan en un plazo máximo de cinco minutos.
-- [ ] Los errores de acceso o esquema no se convierten en resultados vacíos o en ceros.
-- [ ] El DNI no se muestra en tablas, filtros o etiquetas visibles del dashboard.
+- [ ] Una cuenta que no figure en la lista autorizada no puede ver ni cargar datos. (Pendiente de comprobar con una cuenta real no autorizada.)
+- [x] El sistema accede únicamente a la hoja privada configurada y a las tres pestañas esperadas.
+- [x] Variaciones de mayúsculas, tildes y separadores no impiden reconocer encabezados conocidos.
+- [x] Una métrica nueva se conserva como columna disponible.
+- [x] Un campo estructural desconocido presenta una asignación seleccionable y esta dura solo la sesión actual.
+- [x] Una pestaña o campo obligatorio faltante bloquea el análisis y produce un mensaje claro.
+- [x] Las filas sin jugador o fecha quedan fuera del cálculo y se informa su cantidad.
+- [x] Los cambios de datos se reflejan en un plazo máximo de cinco minutos.
+- [x] Los errores de acceso o esquema no se convierten en resultados vacíos o en ceros.
+- [x] El DNI no se muestra en tablas, filtros o etiquetas visibles del dashboard.
