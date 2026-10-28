@@ -1,0 +1,2 @@
+@workspace Lee #file: 
+coordinator.md. Inicia el Modo Autopiloto. Recuerda que no sé programar ni usar la terminal, dame todo con botones para hacer clic en "Run" o "Apply". Arranquemos la Fase 1.
