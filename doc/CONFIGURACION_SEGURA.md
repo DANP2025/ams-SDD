@@ -69,6 +69,14 @@ Streamlit; la plantilla del repositorio contiene marcadores, no credenciales.
 
 ### Formato de los Secrets
 
+Para convertir el archivo de cuenta de servicio sin pegarlo en un chat, abre
+[el convertidor local](../tools/convertir_json_secrets.html) desde la carpeta
+del proyecto. Pega el JSON en la primera caja y pulsa **Convertir a TOML**.
+El convertidor trabaja en el navegador, sin llamadas de red, y genera solo la
+sección `[gcp_service_account]`. Pulsa **Copiar TOML** para copiarla. Después de
+pegarla en Streamlit, vuelve al convertidor y pulsa **Borrar los campos**; borra
+también el portapapeles copiando un texto inocuo.
+
 En Streamlit Community Cloud, abre [share.streamlit.io](https://share.streamlit.io),
 busca AMS en tu espacio de trabajo, pulsa el menú de tres puntos junto a la app,
 elige **Settings** y abre la pestaña **Secrets**. Alternativamente, desde la app
@@ -76,12 +84,11 @@ pulsa **Manage app**, abre el menú de tres puntos del panel de registros y elig
 **Settings → Secrets**. Pega allí un solo documento TOML con tres secciones. No
 pegues el contenido real de credenciales en GitHub ni en este chat.
 
-El JSON de cuenta de servicio no se pega entero: transforma sus campos al
-formato siguiente. En particular, el valor de `private_key` del JSON ya
-contiene los saltos como `\n`. Para ese campo, copia solo lo que está entre las
-comillas del valor JSON y pégalo entre las comillas de TOML; conserva cada
-`\n` tal como aparece. No copies el nombre `"private_key"`, los dos puntos ni
-la coma final:
+Si decides no usar el convertidor, transforma los campos del JSON al formato
+siguiente. En particular, el valor de `private_key` del JSON ya contiene los
+saltos como `\n`. Para ese campo, copia solo lo que está entre las comillas del
+valor JSON y pégalo entre las comillas de TOML; conserva cada `\n` tal como
+aparece. No copies el nombre `"private_key"`, los dos puntos ni la coma final:
 
 ```toml
 [gcp_service_account]
