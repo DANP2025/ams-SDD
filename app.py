@@ -596,6 +596,17 @@ def main() -> None:
 
     try:
         raw_sheets = load_google_sheets()
+    except PermissionError:
+        st.error(
+            "La cuenta de servicio de AMS no puede abrir esta hoja de Google."
+        )
+        st.info(
+            "Comprueba que [app].google_sheet_id sea el ID correcto. Luego, "
+            "en Google Sheets pulsa Compartir y agrega como Lector el correo "
+            "client_email de [gcp_service_account]. Mantén el acceso general "
+            "restringido. Guarda los cambios y vuelve a cargar AMS."
+        )
+        st.stop()
     except (
         gspread.exceptions.APIError,
         gspread.exceptions.SpreadsheetNotFound,
