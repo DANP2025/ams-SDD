@@ -1,0 +1,33 @@
+# Plan — Spec 005: SWC
+
+## Flujo de usuario
+
+1. Seleccionar categoría y uno o varios jugadores.
+2. Elegir explícitamente las fechas o periodos Pre y Post.
+3. Consultar valores Pre y Post, cambio absoluto, tamaño estandarizado y etiqueta de magnitud.
+4. Interpretar el signo según la variable y el contexto, usando la advertencia visible de que magnitud no equivale a beneficio.
+
+## Cálculo
+
+Para cada variable, reunir las mediciones válidas de la categoría seleccionada en Pre. Calcular su desviación estándar muestral. Si existen al menos dos observaciones y la desviación es distinta de cero:
+
+- `Cambio = Post - Pre`
+- `SWC = 0.2 × SD_Pre`
+- `Tamaño estandarizado = Cambio / SD_Pre`
+- Clasificar `abs(Tamaño estandarizado)` con los límites `0.2`, `0.6` y `1.2`.
+
+No usar la desviación de los cambios como denominador para este diseño Pre/Post. No convertir datos faltantes en cero.
+
+## Presentación
+
+- Presentar Pre, Post, cambio, tamaño estandarizado, SWC y magnitud.
+- Mantener visible el signo aunque la categoría de magnitud se base en el valor absoluto.
+- Incluir una nota sobre la interpretación contextual y los límites convencionales de la escala.
+- Evitar etiquetas de beneficio/perjuicio automáticas.
+
+## Validación
+
+- Probar valores alrededor de `0.2`, `0.6` y `1.2`, incluidos los límites exactos.
+- Probar cambios positivos y negativos de igual magnitud.
+- Probar datos faltantes, grupo Pre con menos de dos valores y desviación estándar cero.
+- Verificar que se usa el SD de Pre del grupo de referencia y no el SD del cambio.

@@ -1,5 +1,6 @@
-streamlit
+streamlit>=1.42
 pandas
+gspread>=6,<7
 plotly
 pytest
 scipy
