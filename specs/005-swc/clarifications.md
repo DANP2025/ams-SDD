@@ -6,6 +6,7 @@
 | Método | ¿Qué método aplicar para SWC y sus magnitudes? | Revisar y seguir las definiciones publicadas por Will Hopkins. |
 | Grupo de referencia | ¿Qué desviación usar en un diseño Pre/Post? | Aplicar la orientación de Hopkins: desviación estándar de Pre, usando la categoría seleccionada como población de referencia para AMS. |
 | Etiquetas | ¿Cómo usar Trivial/Small/Moderate/Large? | Aplicar los umbrales de magnitud de Hopkins y mantener la interpretación contextual, sin asumir automáticamente beneficio deportivo. |
+| Vista SWC | ¿Cómo comparar al equipo? | Seleccionar categoría, variable y periodos Pre/Post; graficar todos los jugadores con datos válidos. El signo se describirá como positivo o negativo, nunca como beneficio/perjuicio automático. |
 
 ## Fuentes verificadas
 

@@ -2,7 +2,7 @@ import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
-from math import sqrt
+from math import ceil, sqrt
 from statistics import NormalDist
 
 import gspread
@@ -529,10 +529,6 @@ def _select_all_mbd_players(player_ids: Sequence[str]) -> None:
     st.session_state["mbd_selected_player_ids"] = list(player_ids)
 
 
-def _select_all_swc_players(player_ids: Sequence[str]) -> None:
-    st.session_state["swc_selected_player_ids"] = list(player_ids)
-
-
 def render_dashboard_header() -> None:
     st.markdown(
         """
@@ -736,73 +732,6 @@ def render_dashboard_header() -> None:
             .ams-zscore-table th,
             .ams-zscore-table td {
                 padding: 0.3rem 0.08rem;
-            }
-        }
-        .ams-swc-table-wrap {
-            width: 100%;
-            overflow: hidden;
-            border: 1px solid #d9e2ec;
-            border-radius: 0.75rem;
-        }
-        .ams-swc-table {
-            width: 100%;
-            table-layout: fixed;
-            border-collapse: collapse;
-            font-size: 0.68rem;
-        }
-        .ams-swc-table th,
-        .ams-swc-table td {
-            padding: 0.45rem 0.2rem;
-            border: 1px solid #e2e8f0;
-            text-align: center;
-            vertical-align: middle;
-            overflow-wrap: anywhere;
-        }
-        .ams-swc-table thead th {
-            background: #f5f8fc;
-            color: #334155;
-            font-size: 0.64rem;
-            font-weight: 700;
-            line-height: 1.15;
-        }
-        .ams-swc-table .ams-swc-number {
-            font-variant-numeric: tabular-nums;
-            white-space: nowrap;
-        }
-        .ams-swc-table .ams-swc-magnitude {
-            background: #eef2f7;
-            color: #334155;
-            font-weight: 700;
-        }
-        .ams-swc-table .ams-swc-availability {
-            color: #64748b;
-            font-size: 0.62rem;
-        }
-        @media (max-width: 1150px) {
-            .ams-swc-table {
-                font-size: 0.6rem;
-            }
-            .ams-swc-table th,
-            .ams-swc-table td {
-                padding: 0.35rem 0.12rem;
-            }
-            .ams-swc-table .ams-swc-availability {
-                font-size: 0.54rem;
-            }
-        }
-        @media (max-width: 640px) {
-            .ams-swc-table {
-                font-size: 0.52rem;
-            }
-            .ams-swc-table thead th {
-                font-size: 0.5rem;
-            }
-            .ams-swc-table th,
-            .ams-swc-table td {
-                padding: 0.3rem 0.08rem;
-            }
-            .ams-swc-table .ams-swc-availability {
-                font-size: 0.48rem;
             }
         }
         .ams-stat {
@@ -1415,60 +1344,186 @@ def calculate_swc_changes(
     return pd.DataFrame(output, columns=columns)
 
 
-def build_swc_table_html(results: pd.DataFrame) -> str:
-    if results.empty:
-        return ""
+def build_swc_scatter_plot(
+    results: pd.DataFrame,
+    metric: str,
+    source: str,
+    pre_month: pd.Period,
+    post_month: pd.Period,
+) -> go.Figure:
+    plotted_results = results.loc[
+        results["metric"].eq(metric)
+        & results["source"].eq(source)
+        & results["availability"].eq("Disponible")
+    ].copy()
+    figure = go.Figure()
+    if plotted_results.empty:
+        figure.add_annotation(
+            text="No hay resultados SWC disponibles para esta variable.",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font={"color": "#64748b"},
+        )
+        figure.update_layout(
+            height=440,
+            margin={"t": 60, "b": 70, "l": 70, "r": 30},
+        )
+        return figure
 
-    columns = [
-        ("player_name", "Jugador", "player"),
-        ("source", "Origen", "source"),
-        ("metric", "Variable", "metric"),
-        ("pre_value", "Pre", "number"),
-        ("post_value", "Post", "number"),
-        ("change", "Cambio", "number"),
-        ("swc", "SWC", "number"),
-        ("effect_size", "Efecto", "number"),
-        ("magnitude", "Magnitud", "magnitude"),
-        ("availability", "Disponibilidad", "availability"),
+    max_effect = float(plotted_results["effect_size"].abs().max())
+    axis_limit = max(1.5, ceil(max_effect * 1.1 * 2) / 2)
+    for lower, upper, color in (
+        (-axis_limit, -1.2, "rgba(59, 130, 196, 0.12)"),
+        (-1.2, -0.6, "rgba(59, 130, 196, 0.08)"),
+        (-0.6, -0.2, "rgba(59, 130, 196, 0.045)"),
+        (-0.2, 0.2, "rgba(148, 163, 184, 0.10)"),
+        (0.2, 0.6, "rgba(59, 130, 196, 0.045)"),
+        (0.6, 1.2, "rgba(59, 130, 196, 0.08)"),
+        (1.2, axis_limit, "rgba(59, 130, 196, 0.12)"),
+    ):
+        figure.add_shape(
+            type="rect",
+            x0=0,
+            x1=1,
+            xref="paper",
+            y0=lower,
+            y1=upper,
+            yref="y",
+            fillcolor=color,
+            line={"width": 0},
+            layer="below",
+        )
+    for threshold in (-1.2, -0.6, -0.2, 0, 0.2, 0.6, 1.2):
+        figure.add_hline(
+            y=threshold,
+            line={
+                "color": "#94a3b8" if threshold == 0 else "#9cb3c9",
+                "width": 1 if threshold == 0 else 0.8,
+                "dash": "solid" if threshold == 0 else "dash",
+            },
+            layer="below",
+        )
+    for label, y in (
+        ("Cambio positivo · grande", (axis_limit + 1.2) / 2),
+        ("Cambio positivo · moderado", 0.9),
+        ("Cambio positivo · pequeño", 0.4),
+        ("Cambio trivial", 0),
+        ("Cambio negativo · pequeño", -0.4),
+        ("Cambio negativo · moderado", -0.9),
+        ("Cambio negativo · grande", -(axis_limit + 1.2) / 2),
+    ):
+        figure.add_annotation(
+            x=1.01,
+            y=y,
+            xref="paper",
+            yref="y",
+            text=label,
+            showarrow=False,
+            xanchor="left",
+            font={"size": 9, "color": "#64748b"},
+        )
+
+    positive = plotted_results["effect_size"].gt(0)
+    colors = [
+        "#2563eb" if is_positive else "#64748b"
+        for is_positive in positive
     ]
-    widths = (16, 9, 14, 6, 6, 7, 7, 7, 10, 18)
-    parts = [
-        '<div class="ams-swc-table-wrap"><table class="ams-swc-table" '
-        'style="width:100%;table-layout:fixed" '
-        'aria-label="Resultados SWC por jugador y variable"><colgroup>'
+    text_positions = [
+        ("top center", "bottom center", "middle left", "middle right")[
+            index % 4
+        ]
+        for index in range(len(plotted_results))
     ]
-    parts.extend(
-        f'<col style="width:{width}%">' for width in widths
+    figure.add_trace(
+        go.Scatter(
+            x=plotted_results["post_value"],
+            y=plotted_results["effect_size"],
+            mode="markers+text",
+            text=plotted_results["player_name"],
+            textposition=text_positions,
+            textfont={"size": 10, "color": "#334155"},
+            marker={
+                "size": 12,
+                "color": colors,
+                "line": {"color": "#ffffff", "width": 1.5},
+            },
+            customdata=plotted_results[
+                [
+                    "pre_value",
+                    "post_value",
+                    "change",
+                    "reference_sd",
+                    "swc",
+                    "magnitude",
+                ]
+            ],
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "Pre: %{customdata[0]:.1f}<br>"
+                "Post: %{customdata[1]:.1f}<br>"
+                "Cambio: %{customdata[2]:+.1f}<br>"
+                "Cambio estandarizado: %{y:+.2f} SD<br>"
+                "SD grupo Pre: %{customdata[3]:.1f}<br>"
+                "SWC: %{customdata[4]:.1f}<br>"
+                "Magnitud: %{customdata[5]}"
+                "<extra></extra>"
+            ),
+            showlegend=False,
+        )
     )
-    parts.append("</colgroup><thead><tr>")
-    parts.extend(f"<th>{html.escape(label)}</th>" for _, label, _ in columns)
-    parts.append("</tr></thead><tbody>")
-
-    for row in results.to_dict("records"):
-        parts.append("<tr>")
-        for key, _, cell_type in columns:
-            value = row.get(key)
-            if cell_type == "number":
-                text = "—" if pd.isna(value) else f"{float(value):.1f}"
-                parts.append(f'<td class="ams-swc-number">{text}</td>')
-            elif cell_type == "magnitude":
-                text = html.escape(str(value or "No disponible"))
-                parts.append(f'<td class="ams-swc-magnitude">{text}</td>')
-            elif cell_type == "availability":
-                text = html.escape(str(value or "No disponible"))
-                parts.append(
-                    f'<td class="ams-swc-availability" '
-                    f'title="{html.escape(str(value or ""), quote=True)}">'
-                    f"{text}</td>"
+    figure.update_layout(
+        title={
+            "text": (
+                f"SWC · {metric} · "
+                f"{pre_month.strftime('%Y-%m')} → "
+                f"{post_month.strftime('%Y-%m')} · "
+                f"SD grupo Pre = {plotted_results['reference_sd'].iloc[0]:.1f} · "
+                f"SWC = {plotted_results['swc'].iloc[0]:.1f}"
+            ),
+            "x": 0.08,
+            "xanchor": "left",
+            "font": {"size": 16, "color": "#17212b"},
+        },
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,255,255,0.65)",
+        xaxis={
+            "title": f"Resultado Post · {metric}",
+            "gridcolor": "#e5e7eb",
+            "zeroline": False,
+        },
+        yaxis={
+            "title": "Cambio estandarizado vs Pre (SD)",
+            "range": [-axis_limit, axis_limit],
+            "tickvals": [
+                value
+                for value in (
+                    -6,
+                    -4,
+                    -2,
+                    -1.2,
+                    -0.6,
+                    -0.2,
+                    0,
+                    0.2,
+                    0.6,
+                    1.2,
+                    2,
+                    4,
+                    6,
                 )
-            elif cell_type == "source":
-                text = "Plataforma de fuerza" if value == "Plat de fuerza" else value
-                parts.append(f"<td>{html.escape(str(text or '—'))}</td>")
-            else:
-                parts.append(f"<th>{html.escape(str(value or '—'))}</th>")
-        parts.append("</tr>")
-    parts.append("</tbody></table></div>")
-    return "".join(parts)
+                if -axis_limit <= value <= axis_limit
+            ],
+            "gridcolor": "#e5e7eb",
+            "zeroline": False,
+        },
+        hoverlabel={"bgcolor": "#ffffff", "font": {"color": "#17212b"}},
+        margin={"t": 85, "b": 75, "l": 70, "r": 175},
+        height=520,
+    )
+    return figure
 
 
 def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
@@ -2589,7 +2644,7 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
         return
 
     with st.container(border=True):
-        filter_columns = st.columns([1.05, 1.8, 0.55, 1, 1], gap="small")
+        filter_columns = st.columns([1.1, 1.1, 1, 1], gap="small")
         with filter_columns[0]:
             category = st.selectbox(
                 "Categoría", categories, key="swc_category"
@@ -2616,56 +2671,52 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
 
         pre_month = st.session_state["swc_pre_month"]
         post_month = st.session_state["swc_post_month"]
+        if pre_month == post_month:
+            st.warning("Selecciona meses distintos para los periodos Pre y Post.")
+            return
+
         period_data = category_data.loc[
             category_data["date"].dt.to_period("M").isin(
                 [pre_month, post_month]
             )
         ]
-        player_options = (
-            period_data[["player_id", "player_name"]]
-            .drop_duplicates("player_id")
-            .sort_values("player_name")
+        metric_sources = (
+            period_data[["source", "metric"]]
+            .dropna()
+            .drop_duplicates()
+            .sort_values(["source", "metric"])
         )
-        player_ids = player_options["player_id"].astype(str).tolist()
-        player_names = dict(
-            zip(player_ids, player_options["player_name"].astype(str))
+        if metric_sources.empty:
+            st.warning("No hay variables disponibles en los periodos elegidos.")
+            return
+        metric_options = list(
+            metric_sources.itertuples(index=False, name=None)
         )
-        current_selection = st.session_state.get(
-            "swc_selected_player_ids", []
-        )
-        st.session_state["swc_selected_player_ids"] = [
-            player_id
-            for player_id in current_selection
-            if player_id in player_ids
-        ]
+        metric_labels = {
+            (source, metric): (
+                f"{metric} · Plataforma de fuerza"
+                if source == "Plat de fuerza"
+                else str(metric)
+            )
+            for source, metric in metric_options
+        }
+        if st.session_state.get("swc_metric") not in metric_options:
+            st.session_state["swc_metric"] = metric_options[0]
         with filter_columns[1]:
-            selected_player_ids = st.multiselect(
-                "Jugadores",
-                player_ids,
-                format_func=lambda player_id: player_names.get(
-                    player_id, str(player_id)
-                ),
-                key="swc_selected_player_ids",
-                placeholder="Selecciona uno o varios jugadores",
+            selected_source, selected_metric = st.selectbox(
+                "Variable",
+                metric_options,
+                format_func=lambda option: metric_labels[option],
+                key="swc_metric",
             )
         with filter_columns[2]:
-            st.caption(" ")
-            st.button(
-                "Todos",
-                key="swc_select_all_players",
-                help="Seleccionar todos los jugadores de esta categoría.",
-                on_click=_select_all_swc_players,
-                args=(player_ids,),
-                use_container_width=True,
-            )
-        with filter_columns[3]:
             pre_month = st.selectbox(
                 "Mes Pre",
                 periods,
                 format_func=lambda period: period.strftime("%Y-%m"),
                 key="swc_pre_month",
             )
-        with filter_columns[4]:
+        with filter_columns[3]:
             post_month = st.selectbox(
                 "Mes Post",
                 periods,
@@ -2676,29 +2727,45 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
     if pre_month == post_month:
         st.warning("Selecciona meses distintos para los periodos Pre y Post.")
         return
-    if not selected_player_ids:
-        st.info("Selecciona uno o varios jugadores para comparar.")
-        return
-
+    player_ids = (
+        category_data["player_id"].astype(str).drop_duplicates().tolist()
+    )
     results = calculate_swc_changes(
         measurements,
-        selected_player_ids,
+        player_ids,
         category,
         pre_month,
         post_month,
     )
-    if results.empty:
-        st.info("No hay variables compartidas entre los periodos seleccionados.")
+    if results.empty or not results["metric"].eq(selected_metric).any():
+        st.info("No hay resultados para la variable y periodos seleccionados.")
         return
 
-    st.caption(
-        "Las magnitudes Trivial / Small / Moderate / Large describen el tamaño "
-        "del cambio, no si fue beneficioso o perjudicial. Son umbrales "
-        "convencionales y deben revisarse según la población, variable y protocolo."
+    selected_results = results.loc[
+        results["source"].eq(selected_source)
+        & results["metric"].eq(selected_metric)
+    ]
+    available_count = int(
+        selected_results["availability"].eq("Disponible").sum()
     )
-    st.markdown(
-        build_swc_table_html(results),
-        unsafe_allow_html=True,
+    unavailable_count = len(selected_results) - available_count
+    st.caption(
+        f"Puntos disponibles: {available_count} de {len(selected_results)}. "
+        f"No disponibles: {unavailable_count}. Cada punto representa un jugador. "
+        "Azul = cambio positivo; gris = cambio negativo. Esto no determina "
+        "beneficio ni perjuicio. Las franjas muestran magnitud estandarizada "
+        "(±0.2, ±0.6 y ±1.2 SD)."
+    )
+    st.plotly_chart(
+        build_swc_scatter_plot(
+            results,
+            selected_metric,
+            selected_source,
+            pre_month,
+            post_month,
+        ),
+        use_container_width=True,
+        config={"displayModeBar": False},
     )
 
 

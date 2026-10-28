@@ -12,7 +12,7 @@ from app import (
     calculate_mbd_hopkins,
     calculate_swc_changes,
     calculate_z_scores,
-    build_swc_table_html,
+    build_swc_scatter_plot,
     summarize_mbd_changes,
     build_mbd_player_matrix_html,
     canonicalize_headers,
@@ -154,7 +154,7 @@ def test_swc_rejects_identical_pre_and_post_periods():
         )
 
 
-def test_swc_table_html_keeps_magnitude_neutral_and_player_names_visible():
+def test_swc_scatter_plot_shows_all_players_with_neutral_magnitude_zones():
     results = pd.DataFrame(
         [
             {
@@ -164,21 +164,100 @@ def test_swc_table_html_keeps_magnitude_neutral_and_player_names_visible():
                 "pre_value": 10.0,
                 "post_value": 12.4,
                 "change": 2.4,
+                "reference_sd": 2.0,
                 "swc": 0.4,
                 "effect_size": 1.2,
                 "magnitude": "Large",
                 "availability": "Disponible",
+            },
+            {
+                "player_name": "Beto Dos",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "pre_value": 11.0,
+                "post_value": 9.0,
+                "change": -2.0,
+                "reference_sd": 2.0,
+                "swc": 0.4,
+                "effect_size": -1.0,
+                "magnitude": "Moderate",
+                "availability": "Disponible",
+            },
+            {
+                "player_name": "Caro Tres",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "pre_value": 12.0,
+                "post_value": 13.0,
+                "change": 1.0,
+                "reference_sd": 2.0,
+                "swc": 0.4,
+                "effect_size": 0.5,
+                "magnitude": "Small",
+                "availability": "Disponible",
+            },
+            {
+                "player_name": "No disponible",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "pre_value": 10.0,
+                "post_value": float("nan"),
+                "change": float("nan"),
+                "reference_sd": 0.0,
+                "swc": float("nan"),
+                "effect_size": float("nan"),
+                "magnitude": "No disponible",
+                "availability": "No disponible",
+            },
+        ]
+    )
+
+    figure = build_swc_scatter_plot(
+        results,
+        "Sprint",
+        "Rendimiento",
+        pd.Period("2025-12", freq="M"),
+        pd.Period("2026-01", freq="M"),
+    )
+
+    trace = figure.data[0]
+    assert list(trace.x) == [12.4, 9.0, 13.0]
+    assert list(trace.y) == [1.2, -1.0, 0.5]
+    assert list(trace.text) == ["Ana Maria Gonzalez", "Beto Dos", "Caro Tres"]
+    assert "beneficioso" not in trace.hovertemplate.lower()
+    assert "perjudicial" not in trace.hovertemplate.lower()
+    assert "Resultado Post" in figure.layout.xaxis.title.text
+    assert "Cambio estandarizado" in figure.layout.yaxis.title.text
+    threshold_lines = {
+        shape.y0
+        for shape in figure.layout.shapes
+        if shape.type == "line" and shape.y0 == shape.y1
+    }
+    assert threshold_lines == {-1.2, -0.6, -0.2, 0, 0.2, 0.6, 1.2}
+
+
+def test_swc_scatter_plot_explains_when_no_results_are_available():
+    results = pd.DataFrame(
+        [
+            {
+                "player_name": "Ana Uno",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "availability": "No disponible",
             }
         ]
     )
 
-    table = build_swc_table_html(results)
+    figure = build_swc_scatter_plot(
+        results,
+        "Sprint",
+        "Rendimiento",
+        pd.Period("2025-12", freq="M"),
+        pd.Period("2026-01", freq="M"),
+    )
 
-    assert 'class="ams-swc-table-wrap"' in table
-    assert 'style="width:100%;table-layout:fixed"' in table
-    assert "Ana Maria Gonzalez" in table
-    assert "Large" in table
-    assert "Beneficioso" not in table and "Perjudicial" not in table
+    assert not figure.data
+    assert "No hay resultados SWC disponibles" in figure.layout.annotations[0].text
 
 
 def test_mbd_hopkins_calculates_change_uncertainty_and_neutral_probabilities():

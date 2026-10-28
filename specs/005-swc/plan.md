@@ -2,10 +2,10 @@
 
 ## Flujo de usuario
 
-1. Seleccionar categoría y uno o varios jugadores.
-2. Elegir explícitamente las fechas o periodos Pre y Post.
-3. Consultar valores Pre y Post, cambio absoluto, tamaño estandarizado y etiqueta de magnitud.
-4. Interpretar el signo según la variable y el contexto, usando la advertencia visible de que magnitud no equivale a beneficio.
+1. Seleccionar categoría, variable y periodos Pre/Post.
+2. Ver un punto por cada jugador válido de la categoría, con el resultado Post en X y el cambio estandarizado en Y.
+3. Consultar en el detalle del punto los valores Pre/Post, cambio, SD Pre, SWC y magnitud.
+4. Interpretar el signo como positivo o negativo, con la advertencia visible de que no equivale automáticamente a beneficio o perjuicio.
 
 ## Cálculo
 
@@ -20,8 +20,9 @@ No usar la desviación de los cambios como denominador para este diseño Pre/Pos
 
 ## Presentación
 
-- Presentar Pre, Post, cambio, tamaño estandarizado, SWC y magnitud.
+- Presentar Pre, Post, cambio, tamaño estandarizado, SWC y magnitud en el detalle interactivo de cada punto.
 - Mantener visible el signo aunque la categoría de magnitud se base en el valor absoluto.
+- Mostrar franjas neutrales simétricas en ±0.2, ±0.6 y ±1.2 SD.
 - Incluir una nota sobre la interpretación contextual y los límites convencionales de la escala.
 - Evitar etiquetas de beneficio/perjuicio automáticas.
 
