@@ -357,11 +357,11 @@ def render_dashboard_header() -> None:
             background: #f7f8fa;
         }
         [data-testid="stHeader"] {
-            background: rgba(247, 248, 250, 0.88);
+            background: transparent;
         }
         [data-testid="stMainBlockContainer"] {
             max-width: 1440px;
-            padding-top: 2rem;
+            padding-top: 3.5rem;
             padding-bottom: 4rem;
         }
         [data-testid="stTabs"] [role="tablist"] {
@@ -542,7 +542,7 @@ def render_dashboard_header() -> None:
           </div>
         </div>
         <section class="ams-hero">
-          <div class="ams-eyebrow">Sports performance intelligence</div>
+          <div class="ams-eyebrow">Analítica de rendimiento</div>
           <h1 class="ams-hero-title">Rendimiento, con contexto.</h1>
           <p class="ams-hero-copy">
             Explora las mediciones del equipo y compara cada perfil con una
