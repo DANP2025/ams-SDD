@@ -726,9 +726,10 @@ def main() -> None:
     sheets = standardize_sheets_with_mapping(raw_sheets)
     measurements, excluded_rows = prepare_monthly_measurements(sheets)
     if excluded_rows:
-        st.warning(
-            f"Se excluyeron {excluded_rows} filas de medición sin jugador, "
-            "fecha o categoría válida."
+        formatted_excluded_rows = f"{excluded_rows:,}".replace(",", ".")
+        st.caption(
+            f"Filas incompletas omitidas: {formatted_excluded_rows} "
+            "(sin jugador, fecha o categoría)."
         )
 
     zscore_tab, mbd_tab, swc_tab = st.tabs(
@@ -743,8 +744,8 @@ def main() -> None:
                 reverse=True,
             )
             with st.container(border=True):
-                filters = st.columns([1, 1.25, 2, 0.65, 1.35], gap="medium")
-                with filters[0]:
+                main_filters = st.columns([1, 1.35, 1.35], gap="medium")
+                with main_filters[0]:
                     selected_month = st.selectbox(
                         "Mes",
                         available_months,
@@ -758,9 +759,13 @@ def main() -> None:
                 if not categories:
                     st.warning("No hay categorías en el mes seleccionado.")
                 else:
-                    with filters[1]:
+                    with main_filters[1]:
                         player_category = st.selectbox(
-                            "Categoría de jugadores", categories
+                            "Categoría", categories
+                        )
+                    with main_filters[2]:
+                        reference_category = st.selectbox(
+                            "Comparar con", categories
                         )
 
                     player_options = (
@@ -780,7 +785,8 @@ def main() -> None:
                         for player_id in current_selection
                         if player_id in player_ids
                     ]
-                    with filters[2]:
+                    player_filters = st.columns([4, 1], gap="medium")
+                    with player_filters[0]:
                         selected_player_ids = st.multiselect(
                             "Jugadores",
                             player_ids,
@@ -790,17 +796,14 @@ def main() -> None:
                             key="selected_player_ids",
                             placeholder="Selecciona uno o varios jugadores",
                         )
-                    with filters[3]:
+                    with player_filters[1]:
+                        st.caption(" ")
                         st.button(
                             "Todos",
                             help="Seleccionar todos los jugadores de esta categoría.",
                             on_click=_select_all_players,
                             args=(player_ids,),
                             use_container_width=True,
-                        )
-                    with filters[4]:
-                        reference_category = st.selectbox(
-                            "Comparar con", categories
                         )
 
                     if not selected_player_ids:
@@ -841,7 +844,7 @@ def main() -> None:
                             styled_table,
                             hide_index=True,
                             use_container_width=True,
-                            height=min(38 + 36 * (len(table) + 1), 650),
+                            height=min(38 + 35 * len(table), 650),
                         )
 
                         legend_items = [
