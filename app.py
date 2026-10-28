@@ -1,3 +1,4 @@
+import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -304,8 +305,14 @@ def build_z_score_radar(
             "text": f"Perfil Z-Score vs {reference_category} | {month_label}",
             "x": 0.5,
             "xanchor": "center",
+            "font": {"size": 18, "color": "#17212B"},
         },
         template="plotly_white",
+        font={
+            "family": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            "color": "#344256",
+        },
+        paper_bgcolor="rgba(0,0,0,0)",
         polar={
             "bgcolor": "#FFFFFF",
             "radialaxis": {
@@ -325,7 +332,13 @@ def build_z_score_radar(
             },
         },
         showlegend=True,
-        legend={"orientation": "h", "x": 0.5, "xanchor": "center", "y": -0.12},
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": -0.12,
+            "font": {"size": 12, "color": "#536176"},
+        },
         margin={"t": 70, "b": 65, "l": 60, "r": 60},
         height=620,
     )
@@ -334,6 +347,225 @@ def build_z_score_radar(
 
 def _select_all_players(player_ids: Sequence[str]) -> None:
     st.session_state["selected_player_ids"] = list(player_ids)
+
+
+def render_dashboard_header() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background: #f7f8fa;
+        }
+        [data-testid="stHeader"] {
+            background: rgba(247, 248, 250, 0.88);
+        }
+        [data-testid="stMainBlockContainer"] {
+            max-width: 1440px;
+            padding-top: 2rem;
+            padding-bottom: 4rem;
+        }
+        [data-testid="stTabs"] [role="tablist"] {
+            gap: 1.4rem;
+            border-bottom: 1px solid #e4e8ee;
+        }
+        [data-testid="stTabs"] [role="tab"] {
+            height: 3rem;
+            padding: 0 0.15rem;
+            color: #64748b;
+            font-weight: 550;
+        }
+        [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+            color: #274e7b;
+            font-weight: 700;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            border-color: #e3e8ef;
+            border-radius: 14px;
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+        }
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+            border-color: #d7dee8;
+            border-radius: 9px;
+            background: #ffffff;
+        }
+        [data-testid="stButton"] button {
+            min-height: 2.65rem;
+            border-color: #d7dee8;
+            border-radius: 9px;
+            color: #274e7b;
+            font-weight: 650;
+            transition: border-color 140ms ease, background 140ms ease;
+        }
+        [data-testid="stButton"] button:hover {
+            border-color: #274e7b;
+            background: #f2f6fb;
+            color: #1d3d61;
+        }
+        [data-testid="stDataFrame"] {
+            overflow: hidden;
+            border: 1px solid #e3e8ef;
+            border-radius: 11px;
+        }
+        .ams-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            margin-bottom: 2.15rem;
+        }
+        .ams-brand-mark {
+            display: grid;
+            width: 2.7rem;
+            height: 2.7rem;
+            place-items: center;
+            border: 1px solid #d5dfeb;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #274e7b;
+            font-size: 0.8rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            box-shadow: 0 2px 5px rgba(15, 23, 42, 0.04);
+        }
+        .ams-brand-name {
+            color: #17212b;
+            font-size: 0.94rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .ams-brand-caption {
+            margin-top: 0.12rem;
+            color: #718096;
+            font-size: 0.76rem;
+        }
+        .ams-access-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            margin-left: auto;
+            padding: 0.38rem 0.7rem;
+            border: 1px solid #e1e7ed;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #58677a;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+        .ams-access-dot {
+            width: 0.42rem;
+            height: 0.42rem;
+            border-radius: 50%;
+            background: #35a370;
+        }
+        .ams-hero {
+            margin-bottom: 1.65rem;
+        }
+        .ams-eyebrow {
+            margin-bottom: 0.55rem;
+            color: #52749b;
+            font-size: 0.7rem;
+            font-weight: 750;
+            letter-spacing: 0.13em;
+            text-transform: uppercase;
+        }
+        .ams-hero-title {
+            margin: 0;
+            color: #17212b;
+            font-size: clamp(2rem, 3.2vw, 2.8rem);
+            font-weight: 680;
+            letter-spacing: -0.055em;
+            line-height: 1.12;
+        }
+        .ams-hero-copy {
+            max-width: 48rem;
+            margin: 0.65rem 0 0;
+            color: #667487;
+            font-size: 0.98rem;
+            line-height: 1.65;
+        }
+        .ams-section-heading {
+            margin: 0.35rem 0 0.2rem;
+            color: #17212b;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+        .ams-section-copy {
+            margin: 0 0 0.8rem;
+            color: #758195;
+            font-size: 0.83rem;
+        }
+        .ams-stat {
+            min-height: 5.3rem;
+            padding: 0.9rem 1rem;
+            border: 1px solid #e5e9ef;
+            border-radius: 11px;
+            background: #ffffff;
+        }
+        .ams-stat-label {
+            color: #718096;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        .ams-stat-value {
+            margin-top: 0.4rem;
+            color: #17212b;
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: -0.035em;
+        }
+        @media (max-width: 640px) {
+            [data-testid="stMainBlockContainer"] {
+                padding: 1.25rem 1rem 3rem;
+            }
+            .ams-brand {
+                margin-bottom: 1.6rem;
+            }
+            .ams-access-pill {
+                padding: 0.32rem 0.52rem;
+                font-size: 0.66rem;
+            }
+        }
+        </style>
+        <div class="ams-brand">
+          <div class="ams-brand-mark">AMS</div>
+          <div>
+            <div class="ams-brand-name">Athletic Management System</div>
+            <div class="ams-brand-caption">Rendimiento y analítica deportiva</div>
+          </div>
+          <div class="ams-access-pill">
+            <span class="ams-access-dot"></span>
+            Equipo privado
+          </div>
+        </div>
+        <section class="ams-hero">
+          <div class="ams-eyebrow">Sports performance intelligence</div>
+          <h1 class="ams-hero-title">Rendimiento, con contexto.</h1>
+          <p class="ams-hero-copy">
+            Explora las mediciones del equipo y compara cada perfil con una
+            referencia clara, en un solo lugar.
+          </p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_dashboard_stat(label: str, value: str) -> None:
+    safe_label = html.escape(label)
+    safe_value = html.escape(value)
+    st.markdown(
+        f"""
+        <div class="ams-stat">
+          <div class="ams-stat-label">{safe_label}</div>
+          <div class="ams-stat-value">{safe_value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def prepare_monthly_measurements(
@@ -694,8 +926,7 @@ def main() -> None:
     app_config = secrets["app"]
     require_authorized_user(app_config)
 
-    st.title("AMS · Athletic Management System")
-    st.caption("Acceso restringido al equipo autorizado.")
+    render_dashboard_header()
 
     try:
         raw_sheets = load_google_sheets()
@@ -817,12 +1048,36 @@ def main() -> None:
                             reference_category,
                             player_category,
                         )
-                        st.caption(
-                            "Los colores indican el Z-Score frente a la categoría de "
-                            "referencia. Un resultado positivo no significa "
-                            "automáticamente que sea mejor en términos deportivos."
+                        st.markdown(
+                            '<div class="ams-section-heading">'
+                            "Resumen de la selección</div>",
+                            unsafe_allow_html=True,
                         )
+                        summary = st.columns(3, gap="medium")
+                        with summary[0]:
+                            render_dashboard_stat(
+                                "Jugadores analizados",
+                                str(len(selected_player_ids)),
+                            )
+                        with summary[1]:
+                            render_dashboard_stat(
+                                "Variables disponibles",
+                                str(results["metric"].nunique()),
+                            )
+                        with summary[2]:
+                            render_dashboard_stat(
+                                "Categoría de referencia",
+                                str(reference_category),
+                            )
 
+                        st.markdown(
+                            '<div class="ams-section-heading">'
+                            "Mapa de rendimiento</div>"
+                            '<div class="ams-section-copy">'
+                            "Cada celda muestra el Z-Score del jugador para esa variable."
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
                         table = build_z_score_matrix(results)
                         metric_columns = table.columns.drop("Jugador").tolist()
                         styled_table = (
@@ -839,13 +1094,41 @@ def main() -> None:
                                     "background-color": "#F3F6FA",
                                 },
                             )
+                            .set_table_styles(
+                                [
+                                    {
+                                        "selector": "th",
+                                        "props": [
+                                            ("background-color", "#F3F6FA"),
+                                            ("color", "#536176"),
+                                            ("font-weight", "700"),
+                                            ("font-size", "0.72rem"),
+                                            ("letter-spacing", "0.04em"),
+                                            ("border-bottom", "1px solid #E3E8EF"),
+                                        ],
+                                    },
+                                    {
+                                        "selector": "td",
+                                        "props": [
+                                            ("padding", "0.65rem 0.75rem"),
+                                            ("border-color", "#E8EDF2"),
+                                        ],
+                                    },
+                                ]
+                            )
                         )
-                        st.dataframe(
-                            styled_table,
-                            hide_index=True,
-                            use_container_width=True,
-                            height=min(38 + 35 * len(table), 650),
-                        )
+                        with st.container(border=True):
+                            st.caption(
+                                "Los colores muestran el Z-Score frente a la categoría "
+                                "de referencia. Un resultado positivo no significa "
+                                "automáticamente que sea mejor en términos deportivos."
+                            )
+                            st.dataframe(
+                                styled_table,
+                                hide_index=True,
+                                use_container_width=True,
+                                height=min(38 + 35 * len(table), 650),
+                            )
 
                         legend_items = [
                             ("> +2.0", "Excelente", 2.1),
@@ -898,6 +1181,15 @@ def main() -> None:
                             )
                         )
                         with st.container(border=True):
+                            st.markdown(
+                                '<div class="ams-section-heading">'
+                                "Perfil individual</div>"
+                                '<div class="ams-section-copy">'
+                                "Compara las variables del jugador seleccionado con "
+                                "la referencia Z=0."
+                                "</div>",
+                                unsafe_allow_html=True,
+                            )
                             radar_filter, _ = st.columns([1, 2])
                             with radar_filter:
                                 radar_player_id = st.selectbox(
