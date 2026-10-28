@@ -7,7 +7,9 @@
 - [x] Implementar la clasificación de magnitud por valor absoluto con límites 0.2, 0.6 y 1.2.
 - [x] Mantener el signo del cambio visible junto a la etiqueta de magnitud.
 - [x] Presentar un gráfico de dispersión por variable con un punto por jugador, Pre/Post, cambio, SWC, tamaño estandarizado y magnitud en el detalle.
-- [x] Añadir franjas neutrales simétricas para los cambios positivos y negativos, sin inferir beneficio o perjuicio.
+- [x] Añadir franjas verdes para cambios positivos, rojas para negativos y grises para triviales, sin inferir beneficio o perjuicio.
+- [x] Aumentar la tipografía, evitar etiquetas de magnitud superpuestas y habilitar zoom y desplazamiento del gráfico.
+- [x] Limitar el eje estandarizado a ±6.5 SD e indicar valores exteriores con triángulos y su valor real en el detalle.
 - [x] Mostrar un estado no disponible cuando falten datos, haya muestra insuficiente o SD sea cero.
 - [x] Añadir la advertencia de interpretación contextual y de que magnitud no equivale a beneficio.
 - [x] Añadir pruebas para valores límite, signos opuestos, datos faltantes y selección del SD de Pre.

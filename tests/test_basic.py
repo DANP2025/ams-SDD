@@ -197,6 +197,19 @@ def test_swc_scatter_plot_shows_all_players_with_neutral_magnitude_zones():
                 "availability": "Disponible",
             },
             {
+                "player_name": "Dora Cuatro",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "pre_value": 10.0,
+                "post_value": 20.0,
+                "change": 10.0,
+                "reference_sd": 1.0,
+                "swc": 0.2,
+                "effect_size": 10.0,
+                "magnitude": "Large",
+                "availability": "Disponible",
+            },
+            {
                 "player_name": "No disponible",
                 "source": "Rendimiento",
                 "metric": "Sprint",
@@ -221,9 +234,39 @@ def test_swc_scatter_plot_shows_all_players_with_neutral_magnitude_zones():
     )
 
     trace = figure.data[0]
-    assert list(trace.x) == [12.4, 9.0, 13.0]
-    assert list(trace.y) == [1.2, -1.0, 0.5]
-    assert list(trace.text) == ["Ana Maria Gonzalez", "Beto Dos", "Caro Tres"]
+    assert list(trace.x) == [12.4, 9.0, 13.0, 20.0]
+    assert list(trace.y) == [1.2, -1.0, 0.5, 6.5]
+    assert list(trace.text) == [
+        "Ana Maria Gonzalez",
+        "Beto Dos",
+        "Caro Tres",
+        "Dora Cuatro",
+    ]
+    assert list(trace.marker.color) == [
+        "#16a34a",
+        "#dc2626",
+        "#16a34a",
+        "#16a34a",
+    ]
+    assert list(trace.marker.symbol) == ["circle", "circle", "circle", "triangle-up"]
+    assert trace.textposition[3] == "bottom center"
+    assert trace.customdata[3][6] == 10.0
+    assert figure.layout.yaxis.range == (-6.5, 6.5)
+    assert figure.layout.title.font.size == 19
+    assert figure.layout.xaxis.tickfont.size == 12
+    assert figure.layout.yaxis.title.font.size == 14
+    assert figure.layout.height == 560
+    zone_colors = {
+        shape.fillcolor
+        for shape in figure.layout.shapes
+        if shape.type == "rect"
+    }
+    assert "rgba(220, 38, 38, 0.16)" in zone_colors
+    assert "rgba(22, 163, 74, 0.16)" in zone_colors
+    assert not any(
+        annotation.xref == "paper" and annotation.x > 1
+        for annotation in figure.layout.annotations
+    )
     assert "beneficioso" not in trace.hovertemplate.lower()
     assert "perjudicial" not in trace.hovertemplate.lower()
     assert "Resultado Post" in figure.layout.xaxis.title.text

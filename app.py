@@ -2,7 +2,7 @@ import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
-from math import ceil, sqrt
+from math import sqrt
 from statistics import NormalDist
 
 import gspread
@@ -14,6 +14,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 WORKSHEETS = ("Base de datos", "Rendimiento", "Plat de fuerza")
 MBD_ICC = 0.90
+SWC_PLOT_EFFECT_LIMIT = 6.5
 EXCLUDED_DISPLAY_METRICS = {"age", "edad", "peso", "weight"}
 MBD_METRIC_ORDER = {
     "vo2 max": 0,
@@ -1373,16 +1374,18 @@ def build_swc_scatter_plot(
         )
         return figure
 
-    max_effect = float(plotted_results["effect_size"].abs().max())
-    axis_limit = max(1.5, ceil(max_effect * 1.1 * 2) / 2)
+    axis_limit = SWC_PLOT_EFFECT_LIMIT
+    plotted_results["_plot_effect"] = plotted_results["effect_size"].clip(
+        -axis_limit, axis_limit
+    )
     for lower, upper, color in (
-        (-axis_limit, -1.2, "rgba(59, 130, 196, 0.12)"),
-        (-1.2, -0.6, "rgba(59, 130, 196, 0.08)"),
-        (-0.6, -0.2, "rgba(59, 130, 196, 0.045)"),
-        (-0.2, 0.2, "rgba(148, 163, 184, 0.10)"),
-        (0.2, 0.6, "rgba(59, 130, 196, 0.045)"),
-        (0.6, 1.2, "rgba(59, 130, 196, 0.08)"),
-        (1.2, axis_limit, "rgba(59, 130, 196, 0.12)"),
+        (-axis_limit, -1.2, "rgba(220, 38, 38, 0.16)"),
+        (-1.2, -0.6, "rgba(220, 38, 38, 0.11)"),
+        (-0.6, -0.2, "rgba(220, 38, 38, 0.07)"),
+        (-0.2, 0.2, "rgba(148, 163, 184, 0.12)"),
+        (0.2, 0.6, "rgba(22, 163, 74, 0.07)"),
+        (0.6, 1.2, "rgba(22, 163, 74, 0.11)"),
+        (1.2, axis_limit, "rgba(22, 163, 74, 0.16)"),
     ):
         figure.add_shape(
             type="rect",
@@ -1400,55 +1403,57 @@ def build_swc_scatter_plot(
         figure.add_hline(
             y=threshold,
             line={
-                "color": "#94a3b8" if threshold == 0 else "#9cb3c9",
-                "width": 1 if threshold == 0 else 0.8,
+                "color": (
+                    "#64748b"
+                    if threshold == 0
+                    else "#dc2626"
+                    if threshold < 0
+                    else "#16a34a"
+                ),
+                "width": 1.8 if threshold == 0 else 1.2,
                 "dash": "solid" if threshold == 0 else "dash",
             },
             layer="below",
         )
-    for label, y in (
-        ("Cambio positivo · grande", (axis_limit + 1.2) / 2),
-        ("Cambio positivo · moderado", 0.9),
-        ("Cambio positivo · pequeño", 0.4),
-        ("Cambio trivial", 0),
-        ("Cambio negativo · pequeño", -0.4),
-        ("Cambio negativo · moderado", -0.9),
-        ("Cambio negativo · grande", -(axis_limit + 1.2) / 2),
-    ):
-        figure.add_annotation(
-            x=1.01,
-            y=y,
-            xref="paper",
-            yref="y",
-            text=label,
-            showarrow=False,
-            xanchor="left",
-            font={"size": 9, "color": "#64748b"},
-        )
 
-    positive = plotted_results["effect_size"].gt(0)
-    colors = [
-        "#2563eb" if is_positive else "#64748b"
-        for is_positive in positive
+    colors = plotted_results["effect_size"].map(
+        lambda effect: (
+            "#16a34a" if effect > 0 else "#dc2626" if effect < 0 else "#64748b"
+        )
+    )
+    symbols = [
+        "triangle-up"
+        if effect > axis_limit
+        else "triangle-down"
+        if effect < -axis_limit
+        else "circle"
+        for effect in plotted_results["effect_size"]
     ]
-    text_positions = [
-        ("top center", "bottom center", "middle left", "middle right")[
-            index % 4
-        ]
-        for index in range(len(plotted_results))
-    ]
+    text_positions = []
+    for index, effect in enumerate(plotted_results["effect_size"]):
+        if effect > axis_limit:
+            text_positions.append("bottom center")
+        elif effect < -axis_limit:
+            text_positions.append("top center")
+        else:
+            text_positions.append(
+                ("top center", "bottom center", "middle left", "middle right")[
+                    index % 4
+                ]
+            )
     figure.add_trace(
         go.Scatter(
             x=plotted_results["post_value"],
-            y=plotted_results["effect_size"],
+            y=plotted_results["_plot_effect"],
             mode="markers+text",
             text=plotted_results["player_name"],
             textposition=text_positions,
-            textfont={"size": 10, "color": "#334155"},
+            textfont={"size": 12, "color": "#1e293b"},
             marker={
-                "size": 12,
+                "size": 14,
                 "color": colors,
-                "line": {"color": "#ffffff", "width": 1.5},
+                "symbol": symbols,
+                "line": {"color": "#ffffff", "width": 2},
             },
             customdata=plotted_results[
                 [
@@ -1458,6 +1463,7 @@ def build_swc_scatter_plot(
                     "reference_sd",
                     "swc",
                     "magnitude",
+                    "effect_size",
                 ]
             ],
             hovertemplate=(
@@ -1465,7 +1471,7 @@ def build_swc_scatter_plot(
                 "Pre: %{customdata[0]:.1f}<br>"
                 "Post: %{customdata[1]:.1f}<br>"
                 "Cambio: %{customdata[2]:+.1f}<br>"
-                "Cambio estandarizado: %{y:+.2f} SD<br>"
+                "Cambio estandarizado: %{customdata[6]:+.2f} SD<br>"
                 "SD grupo Pre: %{customdata[3]:.1f}<br>"
                 "SWC: %{customdata[4]:.1f}<br>"
                 "Magnitud: %{customdata[5]}"
@@ -1477,26 +1483,33 @@ def build_swc_scatter_plot(
     figure.update_layout(
         title={
             "text": (
-                f"SWC · {metric} · "
-                f"{pre_month.strftime('%Y-%m')} → "
-                f"{post_month.strftime('%Y-%m')} · "
-                f"SD grupo Pre = {plotted_results['reference_sd'].iloc[0]:.1f} · "
-                f"SWC = {plotted_results['swc'].iloc[0]:.1f}"
+                f"{metric} · {pre_month.strftime('%Y-%m')} → "
+                f"{post_month.strftime('%Y-%m')}<br>"
+                f"<sup>SD grupo Pre = "
+                f"{plotted_results['reference_sd'].iloc[0]:.1f} · "
+                f"SWC = {plotted_results['swc'].iloc[0]:.1f}</sup>"
             ),
-            "x": 0.08,
+            "x": 0,
             "xanchor": "left",
-            "font": {"size": 16, "color": "#17212b"},
+            "font": {"size": 19, "color": "#17212b"},
         },
+        font={"family": "Inter, sans-serif", "size": 12, "color": "#334155"},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(255,255,255,0.65)",
         xaxis={
             "title": f"Resultado Post · {metric}",
             "gridcolor": "#e5e7eb",
             "zeroline": False,
+            "automargin": True,
+            "title_font": {"size": 14},
+            "tickfont": {"size": 12},
         },
         yaxis={
             "title": "Cambio estandarizado vs Pre (SD)",
             "range": [-axis_limit, axis_limit],
+            "automargin": True,
+            "title_font": {"size": 14},
+            "tickfont": {"size": 12},
             "tickvals": [
                 value
                 for value in (
@@ -1519,9 +1532,13 @@ def build_swc_scatter_plot(
             "gridcolor": "#e5e7eb",
             "zeroline": False,
         },
-        hoverlabel={"bgcolor": "#ffffff", "font": {"color": "#17212b"}},
-        margin={"t": 85, "b": 75, "l": 70, "r": 175},
-        height=520,
+        hoverlabel={
+            "bgcolor": "#ffffff",
+            "font": {"color": "#17212b", "size": 13},
+            "bordercolor": "#cbd5e1",
+        },
+        margin={"t": 105, "b": 90, "l": 85, "r": 30},
+        height=560,
     )
     return figure
 
@@ -2701,7 +2718,16 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
             for source, metric in metric_options
         }
         if st.session_state.get("swc_metric") not in metric_options:
-            st.session_state["swc_metric"] = metric_options[0]
+            preferred_metric = next(
+                (
+                    option
+                    for option in metric_options
+                    if normalize_header(option[1])
+                    in {"pot pico", "potencia pico"}
+                ),
+                metric_options[0],
+            )
+            st.session_state["swc_metric"] = preferred_metric
         with filter_columns[1]:
             selected_source, selected_metric = st.selectbox(
                 "Variable",
@@ -2752,9 +2778,13 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
     st.caption(
         f"Puntos disponibles: {available_count} de {len(selected_results)}. "
         f"No disponibles: {unavailable_count}. Cada punto representa un jugador. "
-        "Azul = cambio positivo; gris = cambio negativo. Esto no determina "
-        "beneficio ni perjuicio. Las franjas muestran magnitud estandarizada "
-        "(±0.2, ±0.6 y ±1.2 SD)."
+        "Verde = cambio positivo; rojo = cambio negativo; gris = cambio neutro. "
+        "Los colores indican solo la dirección del cambio, no beneficio ni "
+        "perjuicio. Las franjas indican magnitud estandarizada: pequeño "
+        "(0.2–0.6), moderado (0.6–1.2) y grande (≥1.2 SD). Usa la barra "
+        "del gráfico o la rueda del ratón para explorar los puntos. Los "
+        "triángulos indican valores fuera de ±6.5 SD; el valor real aparece "
+        "al pasar el cursor."
     )
     st.plotly_chart(
         build_swc_scatter_plot(
@@ -2765,7 +2795,11 @@ def render_swc_tab(measurements: pd.DataFrame) -> None:
             post_month,
         ),
         use_container_width=True,
-        config={"displayModeBar": False},
+        config={
+            "displayModeBar": True,
+            "displaylogo": False,
+            "scrollZoom": True,
+        },
     )
 
 
