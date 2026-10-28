@@ -2,6 +2,8 @@ import html
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
+from math import sqrt
+from statistics import NormalDist
 
 import gspread
 import pandas as pd
@@ -11,6 +13,8 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 
 WORKSHEETS = ("Base de datos", "Rendimiento", "Plat de fuerza")
+MBD_ICC = 0.90
+MBD_DIRECTIONS: dict[str, str] = {}
 REQUIRED_AUTH_SETTINGS = (
     "redirect_uri",
     "cookie_secret",
@@ -349,6 +353,10 @@ def _select_all_players(player_ids: Sequence[str]) -> None:
     st.session_state["selected_player_ids"] = list(player_ids)
 
 
+def _select_all_mbd_players(player_ids: Sequence[str]) -> None:
+    st.session_state["mbd_selected_player_ids"] = list(player_ids)
+
+
 def render_dashboard_header() -> None:
     st.markdown(
         """
@@ -684,6 +692,342 @@ def prepare_monthly_measurements(
     return measurements[columns], excluded_rows, diagnostics
 
 
+def classify_mbd_certainty(
+    probability_benefit: float,
+    probability_harm: float,
+) -> str:
+    if probability_benefit <= 0.25 and probability_harm <= 0.25:
+        return "Trivial"
+
+    outcome = (
+        "beneficio"
+        if probability_benefit >= probability_harm
+        else "perjuicio"
+    )
+    probability = max(probability_benefit, probability_harm)
+    if probability > 0.995:
+        certainty = "Casi Seguro"
+    elif probability > 0.95:
+        certainty = "Muy Probable"
+    elif probability > 0.75:
+        certainty = "Probable"
+    elif probability > 0.25:
+        certainty = "Posible"
+    else:
+        certainty = "Trivial"
+    return f"{certainty} {outcome}"
+
+
+def classify_mbd_clarity(
+    probability_benefit: float,
+    probability_harm: float,
+) -> str:
+    if probability_benefit > 0.05 and probability_harm > 0.05:
+        return "NO CLARO"
+    return "CLARO"
+
+
+def calculate_mbd_hopkins(
+    measurements: pd.DataFrame,
+    selected_player_ids: Sequence[str],
+    category: str,
+    pre_month: pd.Period,
+    post_month: pd.Period,
+    directions: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "player_id",
+        "player_name",
+        "metric",
+        "pre_value",
+        "post_value",
+        "change",
+        "reference_n",
+        "reference_sd",
+        "swc",
+        "effect_size",
+        "typical_error",
+        "se_change",
+        "ci_lower",
+        "ci_upper",
+        "p_below_swc",
+        "p_trivial",
+        "p_above_swc",
+        "direction",
+        "p_benefit",
+        "p_harm",
+        "certainty",
+        "clarity",
+        "availability",
+    ]
+    if pre_month == post_month:
+        raise ValueError("Los periodos Pre y Post deben ser diferentes.")
+    if not selected_player_ids:
+        return pd.DataFrame(columns=columns)
+
+    direction_catalog = MBD_DIRECTIONS if directions is None else directions
+    invalid_directions = {
+        direction
+        for direction in direction_catalog.values()
+        if direction not in {"mayor", "menor"}
+    }
+    if invalid_directions:
+        raise ValueError(
+            "Las direcciones MBD permitidas son “mayor” y “menor”."
+        )
+
+    data = measurements.copy()
+    data["player_id"] = data["player_id"].astype("string")
+    data["_month"] = data["date"].dt.to_period("M")
+    relevant = data.loc[
+        data["category"].eq(category)
+        & data["_month"].isin([pre_month, post_month])
+    ]
+    metrics = sorted(relevant["metric"].dropna().unique())
+    if not metrics:
+        return pd.DataFrame(columns=columns)
+
+    reference = relevant.loc[
+        relevant["_month"].eq(pre_month)
+    ].groupby("metric")["value"].agg(["count", "std"])
+    player_values = (
+        relevant.loc[
+            relevant["player_id"].isin(selected_player_ids)
+        ]
+        .groupby(["player_id", "metric", "_month"], as_index=False)
+        .agg(
+            value=("value", "mean"),
+            player_name=("player_name", "first"),
+        )
+    )
+    value_lookup = {
+        (player_id, metric, month): value
+        for player_id, metric, month, value in player_values[
+            ["player_id", "metric", "_month", "value"]
+        ].itertuples(index=False, name=None)
+    }
+    name_lookup = (
+        relevant.drop_duplicates("player_id")
+        .set_index("player_id")["player_name"]
+        .to_dict()
+    )
+    output = []
+
+    for player_id in selected_player_ids:
+        player_id = str(player_id)
+        player_name = name_lookup.get(player_id, "Jugador sin nombre")
+        for metric in metrics:
+            pre_value = value_lookup.get((player_id, metric, pre_month))
+            post_value = value_lookup.get((player_id, metric, post_month))
+            if metric in reference.index:
+                reference_n = int(reference.loc[metric, "count"])
+                reference_sd = float(reference.loc[metric, "std"])
+            else:
+                reference_n = 0
+                reference_sd = float("nan")
+            direction = direction_catalog.get(metric)
+            row = {
+                "player_id": player_id,
+                "player_name": player_name,
+                "metric": metric,
+                "pre_value": pre_value,
+                "post_value": post_value,
+                "change": float("nan"),
+                "reference_n": reference_n,
+                "reference_sd": reference_sd,
+                "swc": float("nan"),
+                "effect_size": float("nan"),
+                "typical_error": float("nan"),
+                "se_change": float("nan"),
+                "ci_lower": float("nan"),
+                "ci_upper": float("nan"),
+                "p_below_swc": float("nan"),
+                "p_trivial": float("nan"),
+                "p_above_swc": float("nan"),
+                "direction": direction or "Sin dirección validada",
+                "p_benefit": float("nan"),
+                "p_harm": float("nan"),
+                "certainty": (
+                    "Sin dirección validada" if direction is None else "No disponible"
+                ),
+                "clarity": (
+                    "Sin dirección validada" if direction is None else "No disponible"
+                ),
+                "availability": "",
+            }
+
+            if pre_value is None or post_value is None:
+                row["availability"] = "Falta una medición Pre o Post."
+            elif reference_n < 2:
+                row["availability"] = (
+                    "Se requieren al menos dos mediciones de referencia en Pre."
+                )
+            elif pd.isna(reference_sd):
+                row["availability"] = "La desviación estándar Pre no está disponible."
+            elif reference_sd == 0:
+                row["availability"] = (
+                    "La desviación estándar de referencia Pre es cero."
+                )
+            else:
+                change = float(post_value - pre_value)
+                swc = 0.2 * reference_sd
+                typical_error = reference_sd * sqrt(1 - MBD_ICC)
+                se_change = typical_error * sqrt(2)
+                ci_lower = change - 1.96 * se_change
+                ci_upper = change + 1.96 * se_change
+                distribution = NormalDist(mu=change, sigma=se_change)
+                p_below_swc = distribution.cdf(-swc)
+                p_above_swc = 1 - distribution.cdf(swc)
+                p_trivial = max(0.0, 1 - p_below_swc - p_above_swc)
+
+                row.update(
+                    {
+                        "change": change,
+                        "swc": swc,
+                        "effect_size": change / reference_sd,
+                        "typical_error": typical_error,
+                        "se_change": se_change,
+                        "ci_lower": ci_lower,
+                        "ci_upper": ci_upper,
+                        "p_below_swc": p_below_swc,
+                        "p_trivial": p_trivial,
+                        "p_above_swc": p_above_swc,
+                        "availability": "Disponible",
+                    }
+                )
+                if direction == "mayor":
+                    probability_benefit = p_above_swc
+                    probability_harm = p_below_swc
+                elif direction == "menor":
+                    probability_benefit = p_below_swc
+                    probability_harm = p_above_swc
+                else:
+                    probability_benefit = float("nan")
+                    probability_harm = float("nan")
+
+                if direction:
+                    row.update(
+                        {
+                            "p_benefit": probability_benefit,
+                            "p_harm": probability_harm,
+                            "certainty": classify_mbd_certainty(
+                                probability_benefit,
+                                probability_harm,
+                            ),
+                            "clarity": classify_mbd_clarity(
+                                probability_benefit,
+                                probability_harm,
+                            ),
+                        }
+                    )
+
+            output.append(row)
+
+    return pd.DataFrame(output, columns=columns)
+
+
+def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
+    valid_results = results.loc[
+        results["change"].notna()
+        & results["ci_lower"].notna()
+        & results["ci_upper"].notna()
+        & results["swc"].gt(0)
+    ].copy()
+    valid_results["_effect"] = valid_results["change"] / valid_results["swc"]
+    valid_results["_lower"] = valid_results["ci_lower"] / valid_results["swc"]
+    valid_results["_upper"] = valid_results["ci_upper"] / valid_results["swc"]
+    valid_results["_label"] = (
+        valid_results["player_name"].astype(str)
+        + " · "
+        + valid_results["metric"].astype(str)
+    )
+    if valid_results.empty:
+        figure = go.Figure()
+        figure.add_annotation(
+            text="No hay intervalos disponibles para graficar.",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font={"color": "#64748b"},
+        )
+        return figure
+
+    x_min = min(-1.25, float(valid_results["_lower"].min()) - 0.25)
+    x_max = max(1.25, float(valid_results["_upper"].max()) + 0.25)
+    figure = go.Figure()
+    figure.add_vrect(
+        x0=x_min,
+        x1=-1,
+        fillcolor="rgba(39, 78, 123, 0.06)",
+        line_width=0,
+        layer="below",
+    )
+    figure.add_vrect(
+        x0=-1,
+        x1=1,
+        fillcolor="rgba(100, 116, 139, 0.12)",
+        line_width=0,
+        layer="below",
+    )
+    figure.add_vrect(
+        x0=1,
+        x1=x_max,
+        fillcolor="rgba(39, 78, 123, 0.06)",
+        line_width=0,
+        layer="below",
+    )
+    figure.add_vline(x=0, line_color="#64748b", line_dash="dash")
+    figure.add_vline(x=-1, line_color="#9aa7b8", line_dash="dot")
+    figure.add_vline(x=1, line_color="#9aa7b8", line_dash="dot")
+    figure.add_trace(
+        go.Scatter(
+            x=valid_results["_effect"],
+            y=valid_results["_label"],
+            mode="markers",
+            marker={"color": "#274E7B", "size": 9},
+            error_x={
+                "type": "data",
+                "symmetric": False,
+                "array": valid_results["_upper"] - valid_results["_effect"],
+                "arrayminus": valid_results["_effect"] - valid_results["_lower"],
+                "color": "#274E7B",
+                "thickness": 1.5,
+                "width": 4,
+            },
+            customdata=valid_results[
+                ["change", "ci_lower", "ci_upper", "swc"]
+            ],
+            hovertemplate=(
+                "%{y}<br>Cambio: %{customdata[0]:.1f}"
+                "<br>IC 95%: %{customdata[1]:.1f} a %{customdata[2]:.1f}"
+                "<br>SWC: %{customdata[3]:.1f}<extra></extra>"
+            ),
+        )
+    )
+    figure.update_layout(
+        template="plotly_white",
+        font={
+            "family": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+            "color": "#344256",
+        },
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={
+            "title": "Cambio expresado en múltiplos de SWC",
+            "range": [x_min, x_max],
+            "zeroline": False,
+            "gridcolor": "#e5e7eb",
+        },
+        yaxis={"autorange": "reversed", "gridcolor": "#e5e7eb"},
+        showlegend=False,
+        margin={"t": 20, "b": 60, "l": 180, "r": 30},
+        height=max(320, min(850, 90 + 42 * len(valid_results))),
+    )
+    return figure
+
+
 def calculate_z_scores(
     measurements: pd.DataFrame,
     selected_player_ids: Sequence[str],
@@ -913,6 +1257,249 @@ def require_authorized_user(app_config: Mapping[str, object]) -> None:
         st.error("Esta cuenta no está autorizada para acceder al AMS.")
         st.button("Cerrar sesión", on_click=st.logout)
         st.stop()
+
+
+def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
+    st.markdown(
+        '<div class="ams-section-heading">Cambio e incertidumbre</div>'
+        '<div class="ams-section-copy">'
+        "Compara mediciones Pre y Post con la categoría seleccionada como "
+        "referencia."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.info(
+        f"El modelo usa ICC fijo de {MBD_ICC:.2f}, una distribución normal y la "
+        "desviación estándar muestral de la categoría en Pre. Los resultados "
+        "son apoyo al análisis profesional; no son un diagnóstico."
+    )
+    st.caption(
+        "Las etiquetas de beneficio o perjuicio solo se activan para variables "
+        "con dirección deseable respaldada por literatura y aprobada para AMS. "
+        "Las demás variables se muestran de forma neutral."
+    )
+    if not MBD_DIRECTIONS:
+        st.caption(
+            "En esta versión aún no hay variables con dirección aprobada; "
+            "las probabilidades se muestran por debajo, dentro y por encima "
+            "del SWC."
+        )
+    if measurements.empty:
+        st.warning("No hay mediciones válidas disponibles para el análisis MBD.")
+        return
+
+    categories = sorted(measurements["category"].dropna().astype(str).unique())
+    if not categories:
+        st.warning("No hay categorías disponibles para analizar.")
+        return
+
+    category = st.selectbox("Categoría", categories, key="mbd_category")
+    category_data = measurements.loc[
+        measurements["category"].astype(str).eq(category)
+    ]
+    periods = sorted(
+        category_data["date"].dt.to_period("M").dropna().unique()
+    )
+    if len(periods) < 2:
+        st.warning(
+            "Se necesitan al menos dos periodos mensuales con mediciones en "
+            "esta categoría."
+        )
+        return
+
+    pre_default = periods[-2]
+    post_default = periods[-1]
+    for key, default_period in (
+        ("mbd_pre_month", pre_default),
+        ("mbd_post_month", post_default),
+    ):
+        if st.session_state.get(key) not in periods:
+            st.session_state[key] = default_period
+
+    period_columns = st.columns(2, gap="medium")
+    with period_columns[0]:
+        pre_month = st.selectbox(
+            "Periodo Pre",
+            periods,
+            format_func=lambda period: period.strftime("%Y-%m"),
+            key="mbd_pre_month",
+        )
+    with period_columns[1]:
+        post_month = st.selectbox(
+            "Periodo Post",
+            periods,
+            format_func=lambda period: period.strftime("%Y-%m"),
+            key="mbd_post_month",
+        )
+
+    player_options = (
+        category_data[["player_id", "player_name"]]
+        .drop_duplicates("player_id")
+        .sort_values("player_name")
+    )
+    player_ids = player_options["player_id"].astype(str).tolist()
+    player_names = dict(
+        zip(player_ids, player_options["player_name"].astype(str))
+    )
+    current_selection = st.session_state.get("mbd_selected_player_ids", [])
+    st.session_state["mbd_selected_player_ids"] = [
+        player_id for player_id in current_selection if player_id in player_ids
+    ]
+    player_columns = st.columns([4, 1], gap="medium")
+    with player_columns[0]:
+        selected_player_ids = st.multiselect(
+            "Jugadores",
+            player_ids,
+            format_func=lambda player_id: player_names.get(
+                player_id, str(player_id)
+            ),
+            key="mbd_selected_player_ids",
+            placeholder="Selecciona uno o varios jugadores",
+        )
+    with player_columns[1]:
+        st.caption(" ")
+        st.button(
+            "Todos",
+            key="mbd_select_all_players",
+            help="Seleccionar todos los jugadores de esta categoría.",
+            on_click=_select_all_mbd_players,
+            args=(player_ids,),
+            use_container_width=True,
+        )
+
+    if pre_month == post_month:
+        st.warning("Selecciona meses distintos para los periodos Pre y Post.")
+        return
+    if not selected_player_ids:
+        st.info("Selecciona uno o varios jugadores para comparar.")
+        return
+
+    results = calculate_mbd_hopkins(
+        measurements,
+        selected_player_ids,
+        category,
+        pre_month,
+        post_month,
+    )
+    if results.empty:
+        st.info("No hay variables compartidas entre los periodos seleccionados.")
+        return
+
+    summary = st.columns(3, gap="medium")
+    summary[0].metric("Jugadores seleccionados", str(len(selected_player_ids)))
+    summary[1].metric("Variables", str(results["metric"].nunique()))
+    summary[2].metric(
+        "Resultados disponibles",
+        str(results["availability"].eq("Disponible").sum()),
+    )
+
+    display_columns = [
+        "player_name",
+        "metric",
+        "pre_value",
+        "post_value",
+        "change",
+        "reference_sd",
+        "swc",
+        "effect_size",
+        "typical_error",
+        "se_change",
+        "ci_lower",
+        "ci_upper",
+        "p_below_swc",
+        "p_trivial",
+        "p_above_swc",
+    ]
+    if results["p_benefit"].notna().any():
+        display_columns.extend(["p_benefit", "p_harm"])
+    display_columns.extend(["direction", "certainty", "clarity", "availability"])
+    display_results = results[display_columns].rename(
+        columns={
+            "player_name": "Jugador",
+            "metric": "Variable",
+            "pre_value": "Pre",
+            "post_value": "Post",
+            "change": "Cambio",
+            "reference_sd": "SD Pre (ref.)",
+            "swc": "SWC",
+            "effect_size": "Tamaño del efecto",
+            "typical_error": "TE",
+            "se_change": "SE del cambio",
+            "ci_lower": "IC 95% inferior",
+            "ci_upper": "IC 95% superior",
+            "p_below_swc": "P < -SWC (%)",
+            "p_trivial": "P trivial (%)",
+            "p_above_swc": "P > +SWC (%)",
+            "p_benefit": "P beneficio (%)",
+            "p_harm": "P perjuicio (%)",
+            "direction": "Dirección",
+            "certainty": "Certeza",
+            "clarity": "Claridad",
+            "availability": "Disponibilidad",
+        }
+    )
+    probability_columns = [
+        "P < -SWC (%)",
+        "P trivial (%)",
+        "P > +SWC (%)",
+    ]
+    if "P beneficio (%)" in display_results:
+        probability_columns.extend(["P beneficio (%)", "P perjuicio (%)"])
+    for column in probability_columns:
+        display_results[column] = display_results[column] * 100
+
+    number_columns = (
+        "Pre",
+        "Post",
+        "Cambio",
+        "SD Pre (ref.)",
+        "SWC",
+        "Tamaño del efecto",
+        "TE",
+        "SE del cambio",
+        "IC 95% inferior",
+        "IC 95% superior",
+    )
+    number_columns = (*number_columns, *probability_columns)
+    st.dataframe(
+        display_results,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            column: st.column_config.NumberColumn(format="%.1f")
+            for column in number_columns
+        },
+        height=min(800, max(180, 42 + 35 * len(display_results))),
+    )
+    st.caption(
+        "Las probabilidades neutrales se refieren a un cambio menor que "
+        "−SWC, dentro de ±SWC o mayor que +SWC. Las probabilidades y los "
+        "intervalos dependen de los supuestos del modelo."
+    )
+
+    available_results = results.loc[
+        results["availability"].eq("Disponible")
+    ]
+    if available_results.empty:
+        st.info(
+            "No se puede dibujar el Forest Plot: faltan mediciones, una muestra "
+            "Pre suficiente o variabilidad en la referencia."
+        )
+    else:
+        st.markdown(
+            '<div class="ams-section-heading">Forest Plot</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "El gráfico usa los mismos límites del intervalo del 95% que la "
+            "tabla, expresados como múltiplos de SWC. Las zonas son neutrales "
+            "mientras no haya una dirección deseable aprobada."
+        )
+        st.plotly_chart(
+            build_mbd_forest_plot(available_results),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
 
 
 def main() -> None:
@@ -1270,7 +1857,7 @@ def main() -> None:
                                 )
 
     with mbd_tab:
-        st.info("MBD Hopkins: Próximamente.")
+        render_mbd_hopkins_tab(measurements)
 
     with swc_tab:
         st.info("SWC: Próximamente.")

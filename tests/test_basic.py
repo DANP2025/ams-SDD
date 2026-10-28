@@ -3,10 +3,14 @@ import pandas as pd
 
 from app import (
     MissingRequiredColumnsError,
+    build_mbd_forest_plot,
     build_z_score_matrix,
     build_z_score_radar,
+    calculate_mbd_hopkins,
     calculate_z_scores,
     canonicalize_headers,
+    classify_mbd_clarity,
+    classify_mbd_certainty,
     classify_z_score,
     missing_secret_settings,
     normalize_header,
@@ -15,6 +19,181 @@ from app import (
     z_score_color,
     z_score_cell_style,
 )
+
+
+def test_mbd_hopkins_calculates_change_uncertainty_and_neutral_probabilities():
+    measurements = pd.DataFrame(
+        [
+            ["p1", "Ana Uno", "2026-01-10", "U18", "Sprint", 10.0],
+            ["p2", "Beto Dos", "2026-01-10", "U18", "Sprint", 14.0],
+            ["p1", "Ana Uno", "2026-02-10", "U18", "Sprint", 13.0],
+            ["p2", "Beto Dos", "2026-02-10", "U18", "Sprint", 15.0],
+        ],
+        columns=[
+            "player_id",
+            "player_name",
+            "date",
+            "category",
+            "metric",
+            "value",
+        ],
+    )
+    measurements["date"] = pd.to_datetime(measurements["date"])
+
+    results = calculate_mbd_hopkins(
+        measurements,
+        ["p1"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+    )
+
+    result = results.iloc[0]
+    reference_sd = 2**0.5 * 2
+    expected_te = reference_sd * (1 - 0.90) ** 0.5
+    assert result["change"] == pytest.approx(3.0)
+    assert result["reference_n"] == 2
+    assert result["reference_sd"] == pytest.approx(reference_sd)
+    assert result["swc"] == pytest.approx(0.2 * reference_sd)
+    assert result["effect_size"] == pytest.approx(3 / reference_sd)
+    assert result["typical_error"] == pytest.approx(expected_te)
+    assert result["se_change"] == pytest.approx(expected_te * 2**0.5)
+    assert result["ci_lower"] == pytest.approx(
+        3 - 1.96 * expected_te * 2**0.5
+    )
+    assert result["ci_upper"] == pytest.approx(
+        3 + 1.96 * expected_te * 2**0.5
+    )
+    assert (
+        result["p_below_swc"]
+        + result["p_trivial"]
+        + result["p_above_swc"]
+    ) == pytest.approx(1.0)
+    assert pd.isna(result["p_benefit"])
+    assert result["certainty"] == "Sin dirección validada"
+    assert result["availability"] == "Disponible"
+
+    figure = build_mbd_forest_plot(results)
+    assert figure.data[0].x[0] == pytest.approx(result["change"] / result["swc"])
+    assert figure.data[0].error_x.array[0] == pytest.approx(
+        result["ci_upper"] / result["swc"] - result["change"] / result["swc"]
+    )
+
+
+def test_mbd_hopkins_applies_approved_direction_and_clarity_labels():
+    measurements = pd.DataFrame(
+        [
+            ["p1", "Ana Uno", "2026-01-10", "U18", "Sprint", 10.0],
+            ["p2", "Beto Dos", "2026-01-10", "U18", "Sprint", 14.0],
+            ["p1", "Ana Uno", "2026-02-10", "U18", "Sprint", 13.0],
+        ],
+        columns=[
+            "player_id",
+            "player_name",
+            "date",
+            "category",
+            "metric",
+            "value",
+        ],
+    )
+    measurements["date"] = pd.to_datetime(measurements["date"])
+
+    result = calculate_mbd_hopkins(
+        measurements,
+        ["p1"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+        directions={"Sprint": "mayor"},
+    ).iloc[0]
+
+    assert result["p_benefit"] == pytest.approx(result["p_above_swc"])
+    assert result["p_harm"] == pytest.approx(result["p_below_swc"])
+    assert result["certainty"].endswith("beneficio")
+    assert result["clarity"] in {"CLARO", "NO CLARO"}
+
+
+@pytest.mark.parametrize(
+    ("probability_benefit", "probability_harm", "expected"),
+    [
+        (0.996, 0.001, "Casi Seguro beneficio"),
+        (0.96, 0.02, "Muy Probable beneficio"),
+        (0.76, 0.02, "Probable beneficio"),
+        (0.30, 0.01, "Posible beneficio"),
+        (0.20, 0.25, "Trivial"),
+        (0.01, 0.80, "Probable perjuicio"),
+        (0.995, 0.001, "Muy Probable beneficio"),
+        (0.95, 0.01, "Probable beneficio"),
+        (0.75, 0.01, "Posible beneficio"),
+        (0.25, 0.01, "Trivial"),
+    ],
+)
+def test_mbd_certainty_classification_uses_specified_thresholds(
+    probability_benefit,
+    probability_harm,
+    expected,
+):
+    assert (
+        classify_mbd_certainty(probability_benefit, probability_harm)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("probability_benefit", "probability_harm", "expected"),
+    [
+        (0.051, 0.051, "NO CLARO"),
+        (0.05, 0.9, "CLARO"),
+        (0.9, 0.05, "CLARO"),
+        (0.049, 0.051, "CLARO"),
+    ],
+)
+def test_mbd_clarity_uses_strict_five_percent_threshold(
+    probability_benefit,
+    probability_harm,
+    expected,
+):
+    assert (
+        classify_mbd_clarity(probability_benefit, probability_harm)
+        == expected
+    )
+
+
+def test_mbd_hopkins_marks_missing_values_and_zero_reference_sd_unavailable():
+    measurements = pd.DataFrame(
+        [
+            ["p1", "Ana Uno", "2026-01-10", "U18", "Metric A", 10.0],
+            ["p1", "Ana Uno", "2026-02-10", "U18", "Metric A", 12.0],
+            ["p1", "Ana Uno", "2026-01-11", "U18", "Metric B", 10.0],
+            ["p2", "Beto Dos", "2026-01-11", "U18", "Metric B", 10.0],
+            ["p1", "Ana Uno", "2026-02-11", "U18", "Metric B", 12.0],
+            ["p1", "Ana Uno", "2026-01-12", "U18", "Metric C", 10.0],
+        ],
+        columns=[
+            "player_id",
+            "player_name",
+            "date",
+            "category",
+            "metric",
+            "value",
+        ],
+    )
+    measurements["date"] = pd.to_datetime(measurements["date"])
+
+    results = calculate_mbd_hopkins(
+        measurements,
+        ["p1"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+    ).set_index("metric")
+
+    assert "al menos dos mediciones" in results.loc["Metric A", "availability"]
+    assert "es cero" in results.loc["Metric B", "availability"]
+    assert "Falta una medición" in results.loc["Metric C", "availability"]
+    assert pd.isna(results.loc["Metric A", "change"])
+    assert pd.isna(results.loc["Metric B", "ci_lower"])
+    assert pd.isna(results.loc["Metric C", "change"])
 
 
 def test_normalize_header_ignores_accents_case_and_separators():
