@@ -981,15 +981,27 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         )
         return figure
 
-    data_min = float(valid_results["_lower"].min())
-    data_max = float(valid_results["_upper"].max())
-    span = max(data_max - data_min, 0.5)
-    x_min = min(-0.5, data_min - span * 0.08)
-    x_max = max(0.5, data_max + span * 0.34)
-    label_x = data_max + span * 0.04
+    axis_limit = 4.5
+    valid_results["_plot_effect"] = valid_results["_effect"].clip(
+        -axis_limit, axis_limit
+    )
+    valid_results["_plot_lower"] = valid_results["_lower"].clip(
+        -axis_limit, axis_limit
+    )
+    valid_results["_plot_upper"] = valid_results["_upper"].clip(
+        -axis_limit, axis_limit
+    )
+    marker_symbols = [
+        "triangle-left"
+        if effect < -axis_limit
+        else "triangle-right"
+        if effect > axis_limit
+        else "circle"
+        for effect in valid_results["_effect"]
+    ]
     figure = go.Figure()
     figure.add_vrect(
-        x0=x_min,
+        x0=-axis_limit,
         x1=-0.2,
         fillcolor="rgba(39, 78, 123, 0.07)",
         line_width=0,
@@ -1004,7 +1016,7 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     )
     figure.add_vrect(
         x0=0.2,
-        x1=x_max,
+        x1=axis_limit,
         fillcolor="rgba(39, 78, 123, 0.07)",
         line_width=0,
         layer="below",
@@ -1014,15 +1026,25 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     figure.add_vline(x=0.2, line_color="#9aa7b8", line_dash="dot")
     figure.add_trace(
         go.Scatter(
-            x=valid_results["_effect"],
+            x=valid_results["_plot_effect"],
             y=valid_results["_label"],
             mode="markers",
-            marker={"color": "#274E7B", "size": 9},
+            marker={
+                "color": "#274E7B",
+                "size": 9,
+                "symbol": marker_symbols,
+            },
             error_x={
                 "type": "data",
                 "symmetric": False,
-                "array": valid_results["_upper"] - valid_results["_effect"],
-                "arrayminus": valid_results["_effect"] - valid_results["_lower"],
+                "array": (
+                    valid_results["_plot_upper"]
+                    - valid_results["_plot_effect"]
+                ),
+                "arrayminus": (
+                    valid_results["_plot_effect"]
+                    - valid_results["_plot_lower"]
+                ),
                 "color": "#274E7B",
                 "thickness": 1.5,
                 "width": 4,
@@ -1030,6 +1052,7 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
             customdata=valid_results[
                 [
                     "change",
+                    "_effect",
                     "ci_lower",
                     "ci_upper",
                     "p_below_swc",
@@ -1038,28 +1061,15 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
                 ]
             ],
             hovertemplate=(
-                "%{y}<br>Tamaño del efecto: %{x:.2f} SD"
+                "%{y}<br>Tamaño del efecto: %{customdata[1]:.2f} SD"
                 "<br>Cambio: %{customdata[0]:.1f}"
-                "<br>IC 95%: %{customdata[1]:.1f} a %{customdata[2]:.1f}"
+                "<br>IC 95%: %{customdata[2]:.1f} a %{customdata[3]:.1f}"
                 "<br>Probabilidades &lt; −SWC / trivial / &gt; +SWC: "
-                "%{customdata[3]:.0%} / %{customdata[4]:.0%} / "
-                "%{customdata[5]:.0%}<extra></extra>"
+                "%{customdata[4]:.0%} / %{customdata[5]:.0%} / "
+                "%{customdata[6]:.0%}<extra></extra>"
             ),
         )
     )
-    for _, row in valid_results.iterrows():
-        figure.add_annotation(
-            x=label_x,
-            y=row["_label"],
-            text=(
-                f"{row['p_below_swc']:.0%} menor · "
-                f"{row['p_trivial']:.0%} trivial · "
-                f"{row['p_above_swc']:.0%} mayor"
-            ),
-            xanchor="left",
-            showarrow=False,
-            font={"size": 10, "color": "#64748b"},
-        )
     figure.update_layout(
         template="plotly_white",
         font={
@@ -1070,13 +1080,13 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis={
             "title": "Tamaño del efecto (SD) · SWC = ±0.2",
-            "range": [x_min, x_max],
+            "range": [-axis_limit, axis_limit],
             "zeroline": False,
             "gridcolor": "#e5e7eb",
         },
         yaxis={"autorange": "reversed", "gridcolor": "#e5e7eb"},
         showlegend=False,
-        margin={"t": 20, "b": 60, "l": 115, "r": 165},
+        margin={"t": 20, "b": 60, "l": 115, "r": 25},
         height=max(320, min(850, 90 + 42 * len(valid_results))),
     )
     return figure

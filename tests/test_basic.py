@@ -133,6 +133,34 @@ def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
     assert matrix.iloc[0, 1] == "No disponible"
 
 
+def test_mbd_forest_plot_bounds_extreme_effects_and_marks_them():
+    results = pd.DataFrame(
+        [
+            {
+                "player_name": "Jugador",
+                "metric": "Variable extrema",
+                "change": 20.0,
+                "reference_sd": 1.0,
+                "swc": 0.2,
+                "ci_lower": 18.0,
+                "ci_upper": 22.0,
+                "p_below_swc": 0.0,
+                "p_trivial": 0.0,
+                "p_above_swc": 1.0,
+            }
+        ]
+    )
+
+    figure = build_mbd_forest_plot(results)
+
+    assert tuple(figure.layout.xaxis.range) == (-4.5, 4.5)
+    assert figure.data[0].x[0] == 4.5
+    assert figure.data[0].marker.symbol[0] == "triangle-right"
+    assert figure.data[0].customdata[0][1] == 20.0
+    assert figure.data[0].customdata[0][2] == 18.0
+    assert figure.data[0].customdata[0][3] == 22.0
+
+
 def test_mbd_probability_summary_counts_unique_most_likely_zones_and_ties():
     results = pd.DataFrame(
         [
