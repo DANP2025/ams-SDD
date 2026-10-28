@@ -385,6 +385,53 @@ def build_z_score_matrix(results: pd.DataFrame) -> pd.DataFrame:
     return matrix[["Jugador", *metrics]]
 
 
+def build_z_score_matrix_html(results: pd.DataFrame) -> str:
+    matrix = build_z_score_matrix(results)
+    if matrix.empty:
+        return ""
+
+    metrics = matrix.columns.drop("Jugador").tolist()
+    metric_width = 82 / max(len(metrics), 1)
+    parts = [
+        '<div class="ams-zscore-table-wrap"><table class="ams-zscore-table" '
+        'style="width:100%;table-layout:fixed" '
+        'aria-label="Mapa de rendimiento por jugador y Z-Score">'
+        '<colgroup><col style="width:18%">'
+    ]
+    parts.extend(
+        f'<col style="width:{metric_width:.4f}%">' for _ in metrics
+    )
+    parts.append("</colgroup><thead><tr><th>Jugador</th>")
+    parts.extend(
+        f"<th title=\"{html.escape(str(metric), quote=True)}\">"
+        f"{html.escape(str(metric))}</th>"
+        for metric in metrics
+    )
+    parts.append("</tr></thead><tbody>")
+
+    for _, row in matrix.iterrows():
+        parts.append(
+            '<tr><th class="ams-zscore-player">'
+            f"{html.escape(str(row['Jugador']))}</th>"
+        )
+        for metric in metrics:
+            value = row[metric]
+            if pd.isna(value):
+                text = "—"
+                style = z_score_cell_style(float("nan"))
+            else:
+                score = float(value)
+                text = f"{score:.1f}"
+                style = z_score_cell_style(score)
+            parts.append(
+                f'<td style="{html.escape(style, quote=True)}">'
+                f"{html.escape(text)}</td>"
+            )
+        parts.append("</tr>")
+    parts.append("</tbody></table></div>")
+    return "".join(parts)
+
+
 def build_z_score_radar(
     player_results: pd.DataFrame,
     player_name: str,
@@ -628,6 +675,64 @@ def render_dashboard_header() -> None:
             margin: 0 0 0.8rem;
             color: #758195;
             font-size: 0.83rem;
+        }
+        .ams-zscore-table-wrap {
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid #d9e2ec;
+            border-radius: 0.75rem;
+        }
+        .ams-zscore-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 0.68rem;
+        }
+        .ams-zscore-table th,
+        .ams-zscore-table td {
+            padding: 0.45rem 0.2rem;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+            vertical-align: middle;
+        }
+        .ams-zscore-table thead th {
+            background: #f5f8fc;
+            color: #334155;
+            font-size: 0.64rem;
+            font-weight: 700;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+        }
+        .ams-zscore-table .ams-zscore-player {
+            background: #f8fafc;
+            color: #334155;
+            font-weight: 650;
+            overflow-wrap: anywhere;
+            text-align: left;
+        }
+        .ams-zscore-table td {
+            font-variant-numeric: tabular-nums;
+        }
+        @media (max-width: 1150px) {
+            .ams-zscore-table {
+                font-size: 0.6rem;
+            }
+            .ams-zscore-table th,
+            .ams-zscore-table td {
+                padding: 0.35rem 0.12rem;
+            }
+        }
+        @media (max-width: 640px) {
+            .ams-zscore-table {
+                font-size: 0.52rem;
+            }
+            .ams-zscore-table thead th {
+                font-size: 0.5rem;
+            }
+            .ams-zscore-table th,
+            .ams-zscore-table td {
+                padding: 0.3rem 0.08rem;
+            }
         }
         .ams-stat {
             min-height: 5.3rem;
@@ -2393,62 +2498,15 @@ def main() -> None:
                             unsafe_allow_html=True,
                         )
                         table = build_z_score_matrix(results)
-                        metric_columns = table.columns.drop("Jugador").tolist()
-                        styled_table = (
-                            table.style.format(
-                                {metric: "{:.1f}" for metric in metric_columns},
-                                na_rep="—",
-                            )
-                            .map(z_score_cell_style, subset=metric_columns)
-                            .set_properties(
-                                subset=["Jugador"],
-                                **{
-                                    "font-weight": "bold",
-                                    "text-align": "left",
-                                    "background-color": "#F3F6FA",
-                                },
-                            )
-                            .set_table_styles(
-                                [
-                                    {
-                                        "selector": "th",
-                                        "props": [
-                                            ("background-color", "#F3F6FA"),
-                                            ("color", "#536176"),
-                                            ("font-weight", "700"),
-                                            ("font-size", "0.72rem"),
-                                            ("letter-spacing", "0.04em"),
-                                            ("border-bottom", "1px solid #E3E8EF"),
-                                        ],
-                                    },
-                                    {
-                                        "selector": "td",
-                                        "props": [
-                                            ("padding", "0.65rem 0.75rem"),
-                                            ("border-color", "#E8EDF2"),
-                                        ],
-                                    },
-                                ]
-                            )
+                        st.caption(
+                            "Los colores muestran el Z-Score frente a la categoría "
+                            "de referencia. Un resultado positivo no significa "
+                            "automáticamente que sea mejor en términos deportivos."
                         )
-                        with st.container(border=True):
-                            st.caption(
-                                "Los colores muestran el Z-Score frente a la categoría "
-                                "de referencia. Un resultado positivo no significa "
-                                "automáticamente que sea mejor en términos deportivos."
-                            )
-                            st.dataframe(
-                                styled_table,
-                                hide_index=True,
-                                use_container_width=True,
-                                height=min(38 + 35 * len(table), 650),
-                                column_config={
-                                    "Jugador": st.column_config.TextColumn(
-                                        "Jugador",
-                                        width="large",
-                                    )
-                                },
-                            )
+                        st.markdown(
+                            build_z_score_matrix_html(results),
+                            unsafe_allow_html=True,
+                        )
 
                         legend_items = [
                             ("> +2.0", "Excelente", 2.1),

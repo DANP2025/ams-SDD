@@ -7,6 +7,7 @@ from app import (
     build_mbd_forest_plot,
     build_mbd_player_matrix,
     build_z_score_matrix,
+    build_z_score_matrix_html,
     build_z_score_radar,
     calculate_mbd_hopkins,
     calculate_z_scores,
@@ -730,6 +731,35 @@ def test_z_score_matrix_excludes_age_and_weight_metrics():
     matrix = build_z_score_matrix(results)
 
     assert matrix.columns.tolist() == ["Jugador", "VO2 max"]
+
+
+def test_z_score_matrix_html_fits_all_columns_and_preserves_full_names():
+    results = pd.DataFrame(
+        [
+            {"player_id": "p1", "player_name": "Ana Maria Gonzalez",
+             "metric": "VO2 max", "z_score": 1.234},
+            {"player_id": "p1", "player_name": "Ana Maria Gonzalez",
+             "metric": "Altura Salto", "z_score": -0.456},
+            {"player_id": "p2", "player_name": "Ricardo FUENTES",
+             "metric": "VO2 max", "z_score": float("nan")},
+            {"player_id": "p2", "player_name": "Ricardo FUENTES",
+             "metric": "Altura Salto", "z_score": 0.75},
+        ]
+    )
+
+    table = build_z_score_matrix_html(results)
+
+    assert 'class="ams-zscore-table-wrap"' in table
+    assert 'aria-label="Mapa de rendimiento por jugador y Z-Score"' in table
+    assert "width:100%" in table
+    assert "Ana Maria Gonzalez" in table
+    assert "Ricardo FUENTES" in table
+    assert "Altura Salto" in table
+    assert ">1.2</td>" in table
+    assert ">-0.5</td>" in table
+    assert ">\u2014</td>" in table
+    assert "background-color: #4CAF50" in table
+    assert "Age" not in table and "Peso" not in table
 
 
 def test_z_score_cell_style_uses_classification_colors_and_readable_text():
