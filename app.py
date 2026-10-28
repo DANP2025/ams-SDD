@@ -233,6 +233,109 @@ def z_score_color(value: float) -> str:
     return "#8B0000"
 
 
+def z_score_cell_style(value: float) -> str:
+    if pd.isna(value):
+        return "background-color: #E9ECEF; color: #1B1B1B"
+    text_color = "#FFFFFF" if value > 1 or value <= -2 else "#1B1B1B"
+    return f"background-color: {z_score_color(value)}; color: {text_color}"
+
+
+def build_z_score_matrix(results: pd.DataFrame) -> pd.DataFrame:
+    if results.empty:
+        return pd.DataFrame(columns=["Jugador"])
+
+    metrics = sorted(results["metric"].dropna().unique())
+    players = results[["player_id", "player_name"]].drop_duplicates("player_id")
+    scores = results.pivot(index="player_id", columns="metric", values="z_score")
+    matrix = players.merge(scores, on="player_id", how="left")
+    matrix = matrix.rename(columns={"player_name": "Jugador"}).drop(
+        columns="player_id"
+    )
+    matrix.columns.name = None
+    return matrix[["Jugador", *metrics]]
+
+
+def build_z_score_radar(
+    player_results: pd.DataFrame,
+    player_name: str,
+    reference_category: str,
+    month_label: str,
+) -> go.Figure:
+    valid_results = player_results.loc[
+        player_results["z_score"].notna()
+    ].sort_values("metric")
+    metrics = valid_results["metric"].astype(str).tolist()
+    z_scores = valid_results["z_score"].astype(float).tolist()
+    closed_metrics = [*metrics, metrics[0]]
+    closed_radii = [3.0] * len(closed_metrics)
+    player_radii = [max(-3.0, min(3.0, score)) + 3.0 for score in z_scores]
+    player_radii.append(player_radii[0])
+    custom_scores = [*z_scores, z_scores[0]]
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatterpolar(
+            r=closed_radii,
+            theta=closed_metrics,
+            name="Media (Z=0)",
+            mode="lines",
+            line={"color": "#DC3545", "dash": "dash", "width": 2},
+            hoverinfo="skip",
+        )
+    )
+    figure.add_trace(
+        go.Scatterpolar(
+            r=player_radii,
+            theta=closed_metrics,
+            customdata=custom_scores,
+            name=player_name,
+            mode="lines+markers",
+            fill="toself",
+            fillcolor="rgba(39, 78, 123, 0.18)",
+            line={"color": "#274E7B", "width": 2.5},
+            marker={"color": "#274E7B", "size": 7},
+            hovertemplate=(
+                "%{theta}<br>Z-Score: %{customdata:.1f}<extra>%{fullData.name}</extra>"
+            ),
+        )
+    )
+    figure.update_layout(
+        title={
+            "text": f"Perfil Z-Score vs {reference_category} | {month_label}",
+            "x": 0.5,
+            "xanchor": "center",
+        },
+        template="plotly_white",
+        polar={
+            "bgcolor": "#FFFFFF",
+            "radialaxis": {
+                "visible": True,
+                "range": [0, 6],
+                "tickmode": "array",
+                "tickvals": list(range(7)),
+                "ticktext": ["-3", "-2", "-1", "0", "+1", "+2", "+3"],
+                "gridcolor": "#E5E7EB",
+                "linecolor": "#D1D5DB",
+            },
+            "angularaxis": {
+                "rotation": 90,
+                "direction": "clockwise",
+                "gridcolor": "#E5E7EB",
+                "linecolor": "#D1D5DB",
+            },
+        },
+        showlegend=True,
+        legend={"orientation": "h", "x": 0.5, "xanchor": "center", "y": -0.12},
+        margin={"t": 70, "b": 65, "l": 60, "r": 60},
+        height=620,
+    )
+    return figure
+
+
+def _select_all_players(player_ids: Sequence[str]) -> None:
+    st.session_state["selected_player_ids"] = list(player_ids)
+
+
 def prepare_monthly_measurements(
     sheets: Mapping[str, pd.DataFrame],
 ) -> tuple[pd.DataFrame, int]:
@@ -639,139 +742,191 @@ def main() -> None:
                 measurements["date"].dt.to_period("M").dropna().unique(),
                 reverse=True,
             )
-            selected_month = st.selectbox(
-                "Mes y año",
-                available_months,
-                format_func=lambda period: period.strftime("%m/%Y"),
-            )
-            month_data = measurements.loc[
-                measurements["date"].dt.to_period("M").eq(selected_month)
-            ]
-            categories = sorted(month_data["category"].dropna().unique())
-            if not categories:
-                st.warning("No hay categorías en el mes seleccionado.")
-            else:
-                filters = st.columns(2)
+            with st.container(border=True):
+                filters = st.columns([1, 1.25, 2, 0.65, 1.35], gap="medium")
                 with filters[0]:
-                    player_category = st.selectbox(
-                        "Categoría de jugadores", categories
+                    selected_month = st.selectbox(
+                        "Mes",
+                        available_months,
+                        format_func=lambda period: period.strftime("%Y-%m"),
                     )
+
+                month_data = measurements.loc[
+                    measurements["date"].dt.to_period("M").eq(selected_month)
+                ]
+                categories = sorted(month_data["category"].dropna().unique())
+                if not categories:
+                    st.warning("No hay categorías en el mes seleccionado.")
+                else:
+                    with filters[1]:
+                        player_category = st.selectbox(
+                            "Categoría de jugadores", categories
+                        )
+
                     player_options = (
                         month_data.loc[month_data["category"].eq(player_category)]
                         .drop_duplicates("player_id")
                         .sort_values("player_name")
                     )
+                    player_ids = player_options["player_id"].tolist()
                     display_names = dict(
-                        zip(player_options["player_id"], player_options["player_name"])
+                        zip(player_ids, player_options["player_name"])
                     )
-                    selected_player_ids = st.multiselect(
-                        "Jugador o jugadores",
-                        player_options["player_id"].tolist(),
-                        format_func=lambda player_id: display_names[player_id],
+                    current_selection = st.session_state.get(
+                        "selected_player_ids", []
                     )
-                with filters[1]:
-                    reference_category = st.selectbox(
-                        "Categoría de referencia", categories
-                    )
-
-                if not selected_player_ids:
-                    st.info("Selecciona al menos un jugador para ver su comparación.")
-                else:
-                    results = calculate_z_scores(
-                        month_data,
-                        selected_player_ids,
-                        reference_category,
-                        player_category,
-                    )
-                    st.caption(
-                        "Los colores muestran la distancia respecto de la media de "
-                        "referencia. Un valor por encima de la media no significa "
-                        "automáticamente que sea mejor en términos deportivos."
-                    )
-                    table = results[
-                        [
-                            "player_name",
-                            "metric",
-                            "value",
-                            "reference_mean",
-                            "z_score",
-                            "classification",
-                        ]
-                    ].rename(
-                        columns={
-                            "player_name": "Jugador",
-                            "metric": "Variable",
-                            "value": "Valor",
-                            "reference_mean": "Media de referencia",
-                            "z_score": "Z-Score",
-                            "classification": "Clasificación",
-                        }
-                    )
-                    classification_colors = {
-                        "Excelente": ("#1A6E1A", "#FFFFFF"),
-                        "Muy Bueno": ("#4CAF50", "#FFFFFF"),
-                        "Bueno": ("#A8D08D", "#1B1B1B"),
-                        "Promedio (Estable)": ("#FFFFFF", "#1B1B1B"),
-                        "Debajo del Promedio": ("#FFD600", "#1B1B1B"),
-                        "Pobre": ("#FF9800", "#1B1B1B"),
-                        "Muy Pobre": ("#E53935", "#FFFFFF"),
-                        "Extremadamente Pobre": ("#8B0000", "#FFFFFF"),
-                        "No disponible": ("#E9ECEF", "#1B1B1B"),
-                    }
-
-                    def style_classification(row: pd.Series) -> list[str]:
-                        background, foreground = classification_colors[
-                            row["Clasificación"]
-                        ]
-                        return [
-                            ""
-                            if column != "Clasificación"
-                            else (
-                                f"background-color: {background}; "
-                                f"color: {foreground}"
-                            )
-                            for column in row.index
-                        ]
-
-                    st.dataframe(
-                        table.style.apply(style_classification, axis=1),
-                        hide_index=True,
-                        use_container_width=True,
-                    )
-
-                    figure = go.Figure()
-                    for player_id in selected_player_ids:
-                        player_results = results.loc[
-                            results["player_id"].eq(str(player_id))
-                            & results["z_score"].notna()
-                        ]
-                        if not player_results.empty:
-                            figure.add_trace(
-                                go.Scatterpolar(
-                                    r=player_results["z_score"],
-                                    theta=player_results["metric"],
-                                    fill="toself",
-                                    name=display_names[str(player_id)],
-                                    marker={
-                                        "color": [
-                                            z_score_color(value)
-                                            for value in player_results["z_score"]
-                                        ],
-                                        "size": 9,
-                                    },
-                                )
-                            )
-                    if figure.data:
-                        figure.update_layout(
-                            polar={"radialaxis": {"visible": True}},
-                            showlegend=True,
-                            margin={"t": 30, "b": 30},
+                    st.session_state["selected_player_ids"] = [
+                        player_id
+                        for player_id in current_selection
+                        if player_id in player_ids
+                    ]
+                    with filters[2]:
+                        selected_player_ids = st.multiselect(
+                            "Jugadores",
+                            player_ids,
+                            format_func=lambda player_id: display_names.get(
+                                player_id, str(player_id)
+                            ),
+                            key="selected_player_ids",
+                            placeholder="Selecciona uno o varios jugadores",
                         )
-                        st.plotly_chart(figure, use_container_width=True)
-                    else:
+                    with filters[3]:
+                        st.button(
+                            "Todos",
+                            help="Seleccionar todos los jugadores de esta categoría.",
+                            on_click=_select_all_players,
+                            args=(player_ids,),
+                            use_container_width=True,
+                        )
+                    with filters[4]:
+                        reference_category = st.selectbox(
+                            "Comparar con", categories
+                        )
+
+                    if not selected_player_ids:
                         st.info(
-                            "No hay suficientes datos de referencia para dibujar el radar."
+                            "Selecciona uno o varios jugadores para ver su comparación."
                         )
+                    else:
+                        results = calculate_z_scores(
+                            month_data,
+                            selected_player_ids,
+                            reference_category,
+                            player_category,
+                        )
+                        st.caption(
+                            "Los colores indican el Z-Score frente a la categoría de "
+                            "referencia. Un resultado positivo no significa "
+                            "automáticamente que sea mejor en términos deportivos."
+                        )
+
+                        table = build_z_score_matrix(results)
+                        metric_columns = table.columns.drop("Jugador").tolist()
+                        styled_table = (
+                            table.style.format(
+                                {metric: "{:.1f}" for metric in metric_columns},
+                                na_rep="—",
+                            )
+                            .map(z_score_cell_style, subset=metric_columns)
+                            .set_properties(
+                                subset=["Jugador"],
+                                **{
+                                    "font-weight": "bold",
+                                    "text-align": "left",
+                                    "background-color": "#F3F6FA",
+                                },
+                            )
+                        )
+                        st.dataframe(
+                            styled_table,
+                            hide_index=True,
+                            use_container_width=True,
+                            height=min(38 + 36 * (len(table) + 1), 650),
+                        )
+
+                        legend_items = [
+                            ("> +2.0", "Excelente", 2.1),
+                            ("+1.0 a +2.0", "Muy bueno", 1.5),
+                            ("+0.5 a +1.0", "Bueno", 0.75),
+                            ("-0.5 a +0.5", "Promedio (estable)", 0),
+                            ("-1.0 a -0.5", "Debajo del promedio", -0.75),
+                            ("-2.0 a -1.0", "Pobre", -1.5),
+                            ("-3.0 a -2.0", "Muy pobre", -2.5),
+                            ("< -3.0", "Extremadamente pobre", -3.1),
+                        ]
+                        with st.expander(
+                            "Guía de colores del Z-Score", expanded=True
+                        ):
+                            for start in range(0, len(legend_items), 4):
+                                legend_columns = st.columns(4, gap="small")
+                                for column, item in zip(
+                                    legend_columns, legend_items[start : start + 4]
+                                ):
+                                    score_range, label, score = item
+                                    background = z_score_color(score)
+                                    foreground = (
+                                        "#FFFFFF"
+                                        if score > 1 or score <= -2
+                                        else "#1B1B1B"
+                                    )
+                                    column.markdown(
+                                        f"<div style='background:{background};"
+                                        f"color:{foreground};padding:.55rem;"
+                                        "margin-bottom:.5rem;border-radius:.35rem;"
+                                        "text-align:center'>"
+                                        f"<strong>{score_range}</strong><br>{label}</div>",
+                                        unsafe_allow_html=True,
+                                    )
+
+                        radar_candidates = results.loc[
+                            results["player_id"].isin(selected_player_ids),
+                            ["player_id", "player_name"],
+                        ].drop_duplicates("player_id")
+                        radar_ids = radar_candidates["player_id"].astype(str).tolist()
+                        if (
+                            st.session_state.get("radar_player_id")
+                            not in radar_ids
+                        ):
+                            st.session_state["radar_player_id"] = radar_ids[0]
+                        radar_names = dict(
+                            zip(
+                                radar_candidates["player_id"].astype(str),
+                                radar_candidates["player_name"],
+                            )
+                        )
+                        with st.container(border=True):
+                            radar_filter, _ = st.columns([1, 2])
+                            with radar_filter:
+                                radar_player_id = st.selectbox(
+                                    "Jugador del radar",
+                                    radar_ids,
+                                    format_func=lambda player_id: radar_names.get(
+                                        player_id, str(player_id)
+                                    ),
+                                    key="radar_player_id",
+                                )
+
+                            player_results = results.loc[
+                                results["player_id"].eq(radar_player_id)
+                                & results["z_score"].notna()
+                            ]
+                            if player_results["metric"].nunique() < 3:
+                                st.info(
+                                    "Se necesitan al menos tres variables con "
+                                    "referencia válida para dibujar el radar."
+                                )
+                            else:
+                                figure = build_z_score_radar(
+                                    player_results,
+                                    radar_names[radar_player_id],
+                                    reference_category,
+                                    selected_month.strftime("%Y-%m"),
+                                )
+                                st.plotly_chart(
+                                    figure,
+                                    use_container_width=True,
+                                    config={"displayModeBar": False},
+                                )
 
     with mbd_tab:
         st.info("MBD Hopkins: Próximamente.")

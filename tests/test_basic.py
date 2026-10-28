@@ -3,6 +3,8 @@ import pandas as pd
 
 from app import (
     MissingRequiredColumnsError,
+    build_z_score_matrix,
+    build_z_score_radar,
     calculate_z_scores,
     canonicalize_headers,
     classify_z_score,
@@ -11,6 +13,7 @@ from app import (
     prepare_monthly_measurements,
     standardize_sheet,
     z_score_color,
+    z_score_cell_style,
 )
 
 
@@ -145,6 +148,68 @@ def test_z_score_colors_follow_the_documented_boundaries():
     assert z_score_color(-1) == "#FFD600"
     assert z_score_color(-3) == "#E53935"
     assert z_score_color(-3.01) == "#8B0000"
+
+
+def test_z_score_matrix_keeps_full_precision_for_display_formatting():
+    results = pd.DataFrame(
+        [
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "metric": "VO2 max",
+                "z_score": 1.234,
+            },
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "metric": "Fuerza",
+                "z_score": -0.456,
+            },
+        ]
+    )
+
+    matrix = build_z_score_matrix(results)
+
+    assert matrix.columns.tolist() == ["Jugador", "Fuerza", "VO2 max"]
+    assert matrix.loc[0, "Fuerza"] == pytest.approx(-0.456)
+    assert matrix.loc[0, "VO2 max"] == pytest.approx(1.234)
+
+
+def test_z_score_cell_style_uses_classification_colors_and_readable_text():
+    assert "background-color: #4CAF50" in z_score_cell_style(1.5)
+    assert "color: #FFFFFF" in z_score_cell_style(1.5)
+    assert "background-color: #E9ECEF" in z_score_cell_style(float("nan"))
+
+
+def test_z_score_radar_shows_zero_reference_and_one_decimal_hover_values():
+    player_results = pd.DataFrame(
+        [
+            {"metric": "VO2 max", "z_score": 1.234},
+            {"metric": "Fuerza", "z_score": -0.456},
+            {"metric": "Velocidad", "z_score": 0.75},
+        ]
+    )
+
+    figure = build_z_score_radar(
+        player_results,
+        "Ana Uno",
+        "Primera",
+        "2026-01",
+    )
+
+    assert len(figure.data) == 2
+    assert list(figure.data[0].r) == [3.0, 3.0, 3.0, 3.0]
+    assert list(figure.data[1].customdata) == [-0.456, 1.234, 0.75, -0.456]
+    assert figure.data[1].hovertemplate.find("%{customdata:.1f}") >= 0
+    assert list(figure.layout.polar.radialaxis.ticktext) == [
+        "-3",
+        "-2",
+        "-1",
+        "0",
+        "+1",
+        "+2",
+        "+3",
+    ]
 
 
 def test_prepare_measurements_uses_latest_value_per_player_and_month():
