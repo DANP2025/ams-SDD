@@ -7,12 +7,16 @@ en el chat o en el repositorio.
 
 ## 1. Publicar el código de forma privada
 
-Streamlit Community Cloud despliega aplicaciones desde GitHub. El repositorio
-que contiene el AMS debe ser privado y no debe incluir `.streamlit/secrets.toml`,
-claves OAuth ni archivos JSON de cuentas de servicio.
+Streamlit Community Cloud despliega aplicaciones desde GitHub. El código puede
+estar en un repositorio público o privado. Un repositorio privado sigue siendo
+visible para su propietario al iniciar sesión en GitHub; la visibilidad del
+código no determina quién puede abrir la aplicación.
 
 En VS Code, usa el panel **Control de código fuente** para publicar el proyecto
-en un repositorio privado de GitHub. No selecciones un repositorio público.
+en el repositorio de GitHub elegido. Si el repositorio es público, revisa que
+solo contenga código, pruebas y documentación: nunca incluyas
+`.streamlit/secrets.toml`, claves OAuth, archivos JSON de cuentas de servicio ni
+filas reales del Google Sheet.
 
 ## 2. Crear el acceso de lectura para el Google Sheet
 
