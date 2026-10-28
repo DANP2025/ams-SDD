@@ -1,8 +1,8 @@
 # Tareas — Spec 004: MBD Hopkins
 
-- [ ] Confirmar el protocolo de medición y la población de referencia de cada variable.
-- [ ] Revisar literatura científica pertinente para establecer la dirección deseable por variable.
-- [ ] Documentar las referencias y solicitar validación profesional antes de activar etiquetas direccionales.
+- [ ] Confirmar que el nombre, protocolo, unidad y población de cada columna coincidan con el catálogo antes de usar sus etiquetas como criterio profesional.
+- [x] Revisar literatura pertinente y documentar las direcciones iniciales configuradas en `directions.md`.
+- [ ] Validar el catálogo y los protocolos locales con el equipo profesional de AMS.
 - [x] Preparar los filtros de categoría, jugadores y periodos Pre/Post.
 - [x] Calcular cambio, desviación estándar muestral, SWC y tamaño del efecto.
 - [x] Calcular TE, error estándar e intervalo del 95% con ICC fijo de 0.90.
@@ -13,4 +13,4 @@
 - [x] Añadir avisos de supuestos y límites de interpretación; los resultados no son un diagnóstico.
 - [x] Probar datos faltantes, muestras pequeñas, desviación cero y fronteras de clasificación.
 
-La primera versión funcional está implementada. Las etiquetas direccionales siguen desactivadas hasta completar las tres tareas de revisión y validación científica pendientes.
+La interfaz muestra etiquetas direccionales solo para alias incluidos en el catálogo documentado. Las direcciones son interpretaciones iniciales con respaldo general; `DRF`, `RFD Dec` y todo alias no validado permanecen neutrales. La verificación de los protocolos locales y la validación del equipo profesional siguen pendientes.

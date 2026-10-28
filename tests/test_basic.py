@@ -2,6 +2,7 @@ import pytest
 import pandas as pd
 
 from app import (
+    MBD_DIRECTIONS,
     MissingRequiredColumnsError,
     build_mbd_forest_plot,
     build_mbd_player_matrix,
@@ -9,10 +10,12 @@ from app import (
     build_z_score_radar,
     calculate_mbd_hopkins,
     calculate_z_scores,
+    build_mbd_player_matrix_html,
     canonicalize_headers,
     classify_mbd_clarity,
     classify_mbd_certainty,
     classify_z_score,
+    lookup_mbd_direction,
     missing_secret_settings,
     normalize_header,
     prepare_monthly_measurements,
@@ -133,6 +136,65 @@ def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
     assert matrix.iloc[0, 1] == "No disponible"
 
 
+def test_mbd_matrix_html_colors_will_hopkins_labels_without_inner_scrolling():
+    results = pd.DataFrame(
+        [
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "source": "Rendimiento",
+                "metric": "VO2 max",
+                "change": 2.0,
+                "p_benefit": 0.97,
+                "p_harm": 0.01,
+                "certainty": "Muy Probable Beneficioso",
+                "clarity": "CLARO",
+                "availability": "Disponible",
+                "p_below_swc": 0.01,
+                "p_trivial": 0.02,
+                "p_above_swc": 0.97,
+            },
+            {
+                "player_id": "p1",
+                "player_name": "Ana Uno",
+                "source": "Plat de fuerza",
+                "metric": "Alt. Salto",
+                "change": -0.5,
+                "p_benefit": 0.10,
+                "p_harm": 0.70,
+                "certainty": "Probable Perjudicial",
+                "clarity": "NO CLARO",
+                "availability": "Disponible",
+                "p_below_swc": 0.70,
+                "p_trivial": 0.20,
+                "p_above_swc": 0.10,
+            },
+        ]
+    )
+
+    table = build_mbd_player_matrix_html(results)
+
+    assert 'class="ams-mbd-table-wrap"' in table
+    assert "Muy Probable Beneficioso<br>" in table
+    assert "CLARO</span></td>" in table
+    assert "Probable Perjudicial<br>" in table
+    assert "NO CLARO</span></td>" in table
+    assert "<th>JUGADOR</th>" in table
+    assert "<th>ORIGEN · VARIABLE</th>" in table
+    assert "70% / 20% / 10%" in table
+    assert 'background:#166534;color:#ffffff' in table
+    assert 'background:#fee2e2;color:#991b1b' in table
+    assert "Alt. Salto" in table
+
+
+def test_mbd_direction_catalog_normalizes_metrics_and_leaves_ambiguous_neutral():
+    assert lookup_mbd_direction("ALT. Salto (cm)", MBD_DIRECTIONS) == "mayor"
+    assert lookup_mbd_direction("Vmax (m/s)", MBD_DIRECTIONS) == "mayor"
+    assert lookup_mbd_direction("F0 (N/kg)", MBD_DIRECTIONS) == "mayor"
+    assert lookup_mbd_direction("DRF", MBD_DIRECTIONS) is None
+    assert lookup_mbd_direction("RFD Dec", MBD_DIRECTIONS) is None
+
+
 def test_mbd_forest_plot_bounds_extreme_effects_and_marks_them():
     results = pd.DataFrame(
         [
@@ -159,6 +221,48 @@ def test_mbd_forest_plot_bounds_extreme_effects_and_marks_them():
     assert figure.data[0].customdata[0][1] == 20.0
     assert figure.data[0].customdata[0][2] == 18.0
     assert figure.data[0].customdata[0][3] == 22.0
+
+
+def test_mbd_forest_plot_colors_outcomes_and_grows_to_show_all_rows():
+    results = pd.DataFrame(
+        [
+            {
+                "player_name": "Jugador",
+                "metric": f"Variable {index}",
+                "change": 0.3,
+                "reference_sd": 1.0,
+                "swc": 0.2,
+                "ci_lower": -0.1,
+                "ci_upper": 0.7,
+                "p_below_swc": 0.1,
+                "p_trivial": 0.2,
+                "p_above_swc": 0.7,
+                "direction": "mayor",
+                "certainty": (
+                    "Probable Beneficioso"
+                    if index % 2
+                    else "Probable Perjudicial"
+                ),
+                "clarity": "NO CLARO" if index % 2 else "CLARO",
+                "p_benefit": 0.7 if index % 2 else 0.1,
+                "p_harm": 0.1 if index % 2 else 0.7,
+                "availability": "Disponible",
+            }
+            for index in range(1, 19)
+        ]
+    )
+
+    figure = build_mbd_forest_plot(results)
+
+    trace_by_name = {trace.name: trace for trace in figure.data}
+    assert set(trace_by_name) == {
+        "Beneficioso · no claro",
+        "Perjudicial · claro",
+    }
+    assert trace_by_name["Beneficioso · no claro"].marker.color == "#86c995"
+    assert trace_by_name["Perjudicial · claro"].marker.color == "#b91c1c"
+    assert sum(len(trace.x) for trace in figure.data) == len(results)
+    assert figure.layout.height > 850
 
 
 def test_mbd_probability_summary_counts_unique_most_likely_zones_and_ties():
@@ -234,22 +338,22 @@ def test_mbd_hopkins_applies_approved_direction_and_clarity_labels():
 
     assert result["p_benefit"] == pytest.approx(result["p_above_swc"])
     assert result["p_harm"] == pytest.approx(result["p_below_swc"])
-    assert result["certainty"].endswith("beneficio")
+    assert result["certainty"].endswith("Beneficioso")
     assert result["clarity"] in {"CLARO", "NO CLARO"}
 
 
 @pytest.mark.parametrize(
     ("probability_benefit", "probability_harm", "expected"),
     [
-        (0.996, 0.001, "Casi Seguro beneficio"),
-        (0.96, 0.02, "Muy Probable beneficio"),
-        (0.76, 0.02, "Probable beneficio"),
-        (0.30, 0.01, "Posible beneficio"),
+        (0.996, 0.001, "Casi Seguro Beneficioso"),
+        (0.96, 0.02, "Muy Probable Beneficioso"),
+        (0.76, 0.02, "Probable Beneficioso"),
+        (0.30, 0.01, "Posible Beneficioso"),
         (0.20, 0.25, "Trivial"),
-        (0.01, 0.80, "Probable perjuicio"),
-        (0.995, 0.001, "Muy Probable beneficio"),
-        (0.95, 0.01, "Probable beneficio"),
-        (0.75, 0.01, "Posible beneficio"),
+        (0.01, 0.80, "Probable Perjudicial"),
+        (0.995, 0.001, "Muy Probable Beneficioso"),
+        (0.95, 0.01, "Probable Beneficioso"),
+        (0.75, 0.01, "Posible Beneficioso"),
         (0.25, 0.01, "Trivial"),
     ],
 )

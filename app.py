@@ -14,7 +14,38 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 WORKSHEETS = ("Base de datos", "Rendimiento", "Plat de fuerza")
 MBD_ICC = 0.90
-MBD_DIRECTIONS: dict[str, str] = {}
+MBD_DIRECTIONS: dict[str, str] = {
+    "vo2 max": "mayor",
+    "vo2max": "mayor",
+    "30 15 ift": "mayor",
+    "30 15 vift": "mayor",
+    "vift": "mayor",
+    "altura salto": "mayor",
+    "altura de salto": "mayor",
+    "alt salto": "mayor",
+    "jump height": "mayor",
+    "cmj height": "mayor",
+    "fuerza cmj": "mayor",
+    "cmj peak force": "mayor",
+    "peak force cmj": "mayor",
+    "pot pico": "mayor",
+    "potencia pico": "mayor",
+    "peak power": "mayor",
+    "fuerza imtp": "mayor",
+    "imtp peak force": "mayor",
+    "peak force imtp": "mayor",
+    "f0": "mayor",
+    "v0": "mayor",
+    "vmax": "mayor",
+    "pmax": "mayor",
+    "rf": "mayor",
+    "rfd 100": "mayor",
+    "rfd 100ms": "mayor",
+    "rfd 150": "mayor",
+    "rfd 150ms": "mayor",
+    "rfd 250": "mayor",
+    "rfd 250ms": "mayor",
+}
 REQUIRED_AUTH_SETTINGS = (
     "redirect_uri",
     "cookie_secret",
@@ -125,6 +156,50 @@ def normalize_header(value: object) -> str:
         character for character in decomposed if not unicodedata.combining(character)
     )
     return re.sub(r"[^a-z0-9]+", " ", without_accents.casefold()).strip()
+
+
+def lookup_mbd_direction(
+    metric: object,
+    directions: Mapping[str, str],
+) -> str | None:
+    normalized_metric = normalize_header(metric)
+    normalized_directions = [
+        (normalize_header(name), direction)
+        for name, direction in directions.items()
+    ]
+    for normalized_name, direction in normalized_directions:
+        if normalized_metric == normalized_name:
+            return direction
+    for normalized_name, direction in sorted(
+        normalized_directions,
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if normalized_metric.startswith(f"{normalized_name} "):
+            return direction
+    return None
+
+
+def mbd_result_color(row: Mapping[str, object]) -> tuple[str, str, str]:
+    availability = row.get("availability")
+    if availability is not None and availability != "Disponible":
+        return "unavailable", "#f1f5f9", "#64748b"
+
+    certainty = str(row.get("certainty", ""))
+    clarity = str(row.get("clarity", ""))
+    if certainty.endswith("Beneficioso"):
+        if clarity == "CLARO":
+            return "benefit_clear", "#166534", "#ffffff"
+        return "benefit_unclear", "#dcfce7", "#166534"
+    if certainty.endswith("Perjudicial"):
+        if clarity == "CLARO":
+            return "harm_clear", "#b91c1c", "#ffffff"
+        return "harm_unclear", "#fee2e2", "#991b1b"
+    if certainty == "Trivial":
+        return "trivial", "#e2e8f0", "#475569"
+    if certainty == "Sin dirección validada":
+        return "neutral", "#eaf1f8", "#274e7b"
+    return "neutral", "#eaf1f8", "#274e7b"
 
 
 def canonicalize_headers(
@@ -709,9 +784,9 @@ def classify_mbd_certainty(
         return "Trivial"
 
     outcome = (
-        "beneficio"
+        "Beneficioso"
         if probability_benefit >= probability_harm
-        else "perjuicio"
+        else "Perjudicial"
     )
     probability = max(probability_benefit, probability_harm)
     if probability > 0.995:
@@ -847,7 +922,7 @@ def calculate_mbd_hopkins(
             else:
                 reference_n = 0
                 reference_sd = float("nan")
-            direction = direction_catalog.get(metric)
+            direction = lookup_mbd_direction(metric, direction_catalog)
             row = {
                 "player_id": player_id,
                 "player_name": player_name,
@@ -965,9 +1040,14 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     valid_results["_upper"] = (
         valid_results["ci_upper"] / valid_results["reference_sd"]
     )
-    valid_results["_label"] = (
-        valid_results["metric"].astype(str)
-    )
+    valid_results["_label"] = valid_results["metric"].astype(str)
+    if "source" in valid_results:
+        duplicate_metrics = valid_results["metric"].duplicated(keep=False)
+        valid_results.loc[duplicate_metrics, "_label"] = (
+            valid_results.loc[duplicate_metrics, "metric"].astype(str)
+            + " · "
+            + valid_results.loc[duplicate_metrics, "source"].astype(str)
+        )
     if valid_results.empty:
         figure = go.Figure()
         figure.add_annotation(
@@ -991,14 +1071,9 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     valid_results["_plot_upper"] = valid_results["_upper"].clip(
         -axis_limit, axis_limit
     )
-    marker_symbols = [
-        "triangle-left"
-        if effect < -axis_limit
-        else "triangle-right"
-        if effect > axis_limit
-        else "circle"
-        for effect in valid_results["_effect"]
-    ]
+    valid_results["_plot_class"] = valid_results.apply(
+        lambda row: mbd_result_color(row)[0], axis=1
+    )
     figure = go.Figure()
     figure.add_vrect(
         x0=-axis_limit,
@@ -1024,52 +1099,69 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     figure.add_vline(x=0, line_color="#64748b", line_dash="dash")
     figure.add_vline(x=-0.2, line_color="#9aa7b8", line_dash="dot")
     figure.add_vline(x=0.2, line_color="#9aa7b8", line_dash="dot")
-    figure.add_trace(
-        go.Scatter(
-            x=valid_results["_plot_effect"],
-            y=valid_results["_label"],
-            mode="markers",
-            marker={
-                "color": "#274E7B",
-                "size": 9,
-                "symbol": marker_symbols,
-            },
-            error_x={
-                "type": "data",
-                "symmetric": False,
-                "array": (
-                    valid_results["_plot_upper"]
-                    - valid_results["_plot_effect"]
+    trace_styles = {
+        "neutral": ("Sin dirección validada", "#274e7b"),
+        "benefit_clear": ("Beneficioso · claro", "#166534"),
+        "benefit_unclear": ("Beneficioso · no claro", "#86c995"),
+        "harm_clear": ("Perjudicial · claro", "#b91c1c"),
+        "harm_unclear": ("Perjudicial · no claro", "#e7a0a0"),
+        "trivial": ("Trivial", "#94a3b8"),
+    }
+    for category, (legend_label, color) in trace_styles.items():
+        group = valid_results.loc[
+            valid_results["_plot_class"].eq(category)
+        ]
+        if group.empty:
+            continue
+        group_symbols = [
+            "triangle-left"
+            if effect < -axis_limit
+            else "triangle-right"
+            if effect > axis_limit
+            else "circle"
+            for effect in group["_effect"]
+        ]
+        figure.add_trace(
+            go.Scatter(
+                x=group["_plot_effect"],
+                y=group["_label"],
+                mode="markers",
+                name=legend_label,
+                marker={
+                    "color": color,
+                    "size": 9,
+                    "symbol": group_symbols,
+                },
+                error_x={
+                    "type": "data",
+                    "symmetric": False,
+                    "array": group["_plot_upper"] - group["_plot_effect"],
+                    "arrayminus": group["_plot_effect"] - group["_plot_lower"],
+                    "color": color,
+                    "thickness": 1.5,
+                    "width": 4,
+                },
+                customdata=group[
+                    [
+                        "change",
+                        "_effect",
+                        "ci_lower",
+                        "ci_upper",
+                        "p_below_swc",
+                        "p_trivial",
+                        "p_above_swc",
+                    ]
+                ],
+                hovertemplate=(
+                    "%{y}<br>Tamaño del efecto: %{customdata[1]:.2f} SD"
+                    "<br>Cambio: %{customdata[0]:.1f}"
+                    "<br>IC 95%: %{customdata[2]:.1f} a %{customdata[3]:.1f}"
+                    "<br>Probabilidades &lt; −SWC / trivial / &gt; +SWC: "
+                    "%{customdata[4]:.0%} / %{customdata[5]:.0%} / "
+                    "%{customdata[6]:.0%}<extra></extra>"
                 ),
-                "arrayminus": (
-                    valid_results["_plot_effect"]
-                    - valid_results["_plot_lower"]
-                ),
-                "color": "#274E7B",
-                "thickness": 1.5,
-                "width": 4,
-            },
-            customdata=valid_results[
-                [
-                    "change",
-                    "_effect",
-                    "ci_lower",
-                    "ci_upper",
-                    "p_below_swc",
-                    "p_trivial",
-                    "p_above_swc",
-                ]
-            ],
-            hovertemplate=(
-                "%{y}<br>Tamaño del efecto: %{customdata[1]:.2f} SD"
-                "<br>Cambio: %{customdata[0]:.1f}"
-                "<br>IC 95%: %{customdata[2]:.1f} a %{customdata[3]:.1f}"
-                "<br>Probabilidades &lt; −SWC / trivial / &gt; +SWC: "
-                "%{customdata[4]:.0%} / %{customdata[5]:.0%} / "
-                "%{customdata[6]:.0%}<extra></extra>"
-            ),
+            )
         )
-    )
     figure.update_layout(
         template="plotly_white",
         font={
@@ -1084,10 +1176,15 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
             "zeroline": False,
             "gridcolor": "#e5e7eb",
         },
-        yaxis={"autorange": "reversed", "gridcolor": "#e5e7eb"},
-        showlegend=False,
-        margin={"t": 20, "b": 60, "l": 115, "r": 25},
-        height=max(320, min(850, 90 + 42 * len(valid_results))),
+        yaxis={
+            "autorange": "reversed",
+            "categoryorder": "array",
+            "categoryarray": valid_results["_label"].tolist(),
+            "gridcolor": "#e5e7eb",
+        },
+        legend={"orientation": "h", "y": 1.12, "x": 0},
+        margin={"t": 65, "b": 60, "l": 150, "r": 25},
+        height=max(360, 110 + 52 * len(valid_results)),
     )
     return figure
 
@@ -1095,16 +1192,7 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
 def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
     data = results.copy()
     data["cell"] = data.apply(
-        lambda row: (
-            "No disponible"
-            if row["availability"] != "Disponible"
-            else (
-                f"Δ {row['change']:+.1f}\n"
-                f"{row['p_below_swc']:.0%} / "
-                f"{row['p_trivial']:.0%} / "
-                f"{row['p_above_swc']:.0%}"
-            )
-        ),
+        _format_mbd_matrix_cell,
         axis=1,
     )
     matrix = data.pivot(
@@ -1140,6 +1228,111 @@ def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
     )
     matrix.index.name = "JUGADOR"
     return matrix
+
+
+def _format_mbd_matrix_cell(row: pd.Series) -> str:
+    if row["availability"] != "Disponible":
+        return "No disponible"
+    if pd.notna(row.get("p_benefit")):
+        return (
+            f"{row['certainty']}\n{row['clarity']}\n"
+            f"Δ {row['change']:+.1f}"
+        )
+    return (
+        f"Δ {row['change']:+.1f}\n"
+        f"{row['p_below_swc']:.0%} / "
+        f"{row['p_trivial']:.0%} / "
+        f"{row['p_above_swc']:.0%}"
+    )
+
+
+def build_mbd_player_matrix_html(results: pd.DataFrame) -> str:
+    if results.empty:
+        return ""
+
+    source_labels = {
+        "Rendimiento": "RENDIMIENTO",
+        "Plat de fuerza": "PLATAFORMA DE FUERZA",
+        "Mediciones": "MEDICIONES",
+    }
+    source_order = {
+        "Rendimiento": 0,
+        "Plat de fuerza": 1,
+        "Mediciones": 2,
+    }
+    data = results.copy()
+    data["_source_order"] = data["source"].map(source_order).fillna(3)
+    data = data.sort_values(
+        ["_source_order", "source", "metric", "player_name"],
+        kind="stable",
+    )
+    parts = [
+        '<div class="ams-mbd-table-wrap"><table class="ams-mbd-table" '
+        'aria-label="Resultados MBD por jugador, origen y variable">'
+        "<thead><tr>"
+        '<th>JUGADOR</th><th>ORIGEN · VARIABLE</th><th>CAMBIO · CLASIFICACIÓN</th>'
+        "<th>PROBABILIDADES / SWC</th></tr></thead><tbody>"
+    ]
+    current_source = None
+    for _, result in data.iterrows():
+        source = str(result["source"])
+        if source != current_source:
+            current_source = source
+            source_label = source_labels.get(source, source.upper())
+            parts.append(
+                f'<tr><th class="ams-mbd-source" colspan="4">'
+                f"{html.escape(source_label)}</th></tr>"
+            )
+
+        classification, background, foreground = mbd_result_color(result)
+        player_name = html.escape(str(result["player_name"]))
+        metric = html.escape(str(result["metric"]))
+        tooltip = html.escape(str(result["availability"]), quote=True)
+        change = result.get("change")
+        if pd.notna(change):
+            change_text = f"Δ {float(change):+.1f}"
+        else:
+            change_text = "No disponible"
+
+        if classification in {
+            "benefit_clear",
+            "benefit_unclear",
+            "harm_clear",
+            "harm_unclear",
+        }:
+            classification_text = html.escape(str(result["certainty"]))
+            clarity = html.escape(str(result["clarity"]))
+            interpretation = (
+                f"{classification_text}<br>"
+                f'<span class="ams-mbd-clarity">{clarity}</span>'
+            )
+        elif classification == "neutral":
+            interpretation = "Sin dirección validada"
+        elif classification == "trivial":
+            interpretation = "Trivial"
+        else:
+            interpretation = "No disponible"
+
+        if result["availability"] == "Disponible":
+            probabilities = (
+                f"{result['p_below_swc']:.0%} / "
+                f"{result['p_trivial']:.0%} / "
+                f"{result['p_above_swc']:.0%}"
+            )
+        else:
+            probabilities = "—"
+        parts.append(
+            "<tr>"
+            f'<td class="ams-mbd-player-name">{player_name}</td>'
+            f'<td class="ams-mbd-metric">{metric}</td>'
+            f'<td title="{tooltip}" style="background:{background};'
+            f'color:{foreground}"><strong>{html.escape(change_text)}</strong>'
+            f"<br>{interpretation}</td>"
+            f'<td title="{tooltip}">{probabilities}</td>'
+            "</tr>"
+        )
+    parts.append("</tbody></table></div>")
+    return "".join(parts)
 
 
 def summarize_mbd_probabilities(results: pd.DataFrame) -> dict[str, int]:
@@ -1401,7 +1594,10 @@ def require_authorized_user(app_config: Mapping[str, object]) -> None:
         st.stop()
 
 
-def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
+def render_mbd_hopkins_tab(
+    measurements: pd.DataFrame,
+    data_diagnostics: Mapping[str, Mapping[str, int]] | None = None,
+) -> None:
     st.markdown(
         """
         <style>
@@ -1436,6 +1632,57 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
             font-weight: 700;
             margin-top: .2rem;
         }
+        .ams-mbd-table-wrap {
+            border: 1px solid #d9e2ec;
+            border-radius: .75rem;
+            overflow: hidden;
+            width: 100%;
+        }
+        .ams-mbd-table {
+            border-collapse: collapse;
+            font-size: .8rem;
+            width: 100%;
+        }
+        .ams-mbd-table th,
+        .ams-mbd-table td {
+            border: 1px solid #e2e8f0;
+            overflow-wrap: anywhere;
+            padding: .5rem .65rem;
+            vertical-align: middle;
+        }
+        .ams-mbd-table thead th {
+            background: #f5f8fc;
+            color: #334155;
+            font-weight: 700;
+        }
+        .ams-mbd-table .ams-mbd-source {
+            background: #dce9f6;
+            color: #274e7b;
+            font-size: .67rem;
+            letter-spacing: .025em;
+            text-align: left;
+        }
+        .ams-mbd-table td:nth-child(3),
+        .ams-mbd-table td:nth-child(4) {
+            text-align: center;
+        }
+        .ams-mbd-table .ams-mbd-player-name {
+            color: #334155;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+        .ams-mbd-table .ams-mbd-metric {
+            background: #f8fafc;
+            color: #334155;
+            font-weight: 600;
+        }
+        .ams-mbd-clarity {
+            display: inline-block;
+            font-size: .68rem;
+            font-weight: 750;
+            letter-spacing: .035em;
+            margin-top: .12rem;
+        }
         </style>
         <div class="ams-mbd-title">📈 MBD — Magnitud Basada en Decisiones</div>
         <div class="ams-mbd-subtitle">
@@ -1447,6 +1694,20 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
     if measurements.empty:
         st.warning("No hay mediciones válidas disponibles para el análisis MBD.")
         return
+    force_sheet_diagnostics = (data_diagnostics or {}).get("Plat de fuerza", {})
+    excluded_force_rows = force_sheet_diagnostics.get("excluded", 0)
+    if excluded_force_rows:
+        st.caption(
+            "Hay filas excluidas en Plat de fuerza por datos de jugador, fecha "
+            "o categoría; algunas variables (por ejemplo, Alt. Salto) podrían "
+            "no estar disponibles. Revisa el diagnóstico de calidad de datos."
+        )
+    if "source" in measurements and not measurements["source"].eq("Plat de fuerza").any():
+        st.info(
+            "No hay mediciones válidas de la plataforma de fuerza en los datos "
+            "disponibles; no es posible mostrar Alt. Salto ni otras variables "
+            "de esa hoja."
+        )
 
     categories = sorted(measurements["category"].dropna().astype(str).unique())
     if not categories:
@@ -1562,54 +1823,14 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
         key="mbd_forest_player_id",
     )
     st.markdown("**Resultados por jugador y variable**")
-    st.caption("Cambio · Probabilidad < −SWC / trivial / > +SWC")
-    matrix = build_mbd_player_matrix(results)
-    styled_matrix = (
-        matrix.style.set_properties(
-            **{
-                "background-color": "#EAF1F8",
-                "color": "#17212B",
-                "font-weight": "600",
-                "text-align": "center",
-                "white-space": "pre-wrap",
-                "border": "1px solid #D9E2EC",
-                "min-width": "92px",
-            }
-        )
-        .map(
-            lambda value: (
-                "background-color: #F1F4F8; color: #64748B;"
-                if value == "No disponible"
-                else ""
-            )
-        )
-        .set_table_styles(
-            [
-                {
-                    "selector": "th",
-                    "props": [
-                        ("background-color", "#F5F8FC"),
-                        ("color", "#334155"),
-                        ("font-weight", "700"),
-                        ("text-align", "center"),
-                    ],
-                },
-                {
-                    "selector": "th.level0",
-                    "props": [
-                        ("background-color", "#DCE9F6"),
-                        ("color", "#274E7B"),
-                    ],
-                },
-            ]
-        )
+    st.caption(
+        "Las variables con dirección definida muestran certeza y claridad; "
+        "las demás conservan cambio y probabilidades neutrales."
     )
-    with st.container(border=True):
-        st.dataframe(
-            styled_matrix,
-            use_container_width=True,
-            height=min(620, max(155, 74 + 46 * len(matrix))),
-        )
+    st.markdown(
+        build_mbd_player_matrix_html(results),
+        unsafe_allow_html=True,
+    )
 
     forest_results = results.loc[
         results["player_id"].astype(str).eq(str(forest_player_id))
@@ -2094,7 +2315,7 @@ def main() -> None:
                                 )
 
     with mbd_tab:
-        render_mbd_hopkins_tab(measurements)
+        render_mbd_hopkins_tab(measurements, data_diagnostics)
 
     with swc_tab:
         st.info("SWC: Próximamente.")
