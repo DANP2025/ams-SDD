@@ -14,6 +14,31 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 WORKSHEETS = ("Base de datos", "Rendimiento", "Plat de fuerza")
 MBD_ICC = 0.90
+MBD_METRIC_ORDER = {
+    "vo2 max": 0,
+    "vo2max": 0,
+    "f0": 1,
+    "v0": 2,
+    "pmax": 3,
+    "vmax": 4,
+    "rf": 5,
+    "drf": 6,
+    "fuerza cmj": 7,
+    "pot pico": 8,
+    "potencia pico": 8,
+    "altura salto": 9,
+    "altura de salto": 9,
+    "fuerza imtp": 10,
+    "rfd dec": 11,
+    "rfd 100": 12,
+    "rfd 100ms": 12,
+    "rfd 150": 13,
+    "rfd 150ms": 13,
+    "rfd 250": 14,
+    "rfd 250ms": 14,
+    "30 15 ift": 15,
+    "30 15 vift": 16,
+}
 MBD_DIRECTIONS: dict[str, str] = {
     "vo2 max": "mayor",
     "vo2max": "mayor",
@@ -178,6 +203,23 @@ def lookup_mbd_direction(
         if normalized_metric.startswith(f"{normalized_name} "):
             return direction
     return None
+
+
+def mbd_metric_sort_key(source: object, metric: object) -> tuple[int, int, str]:
+    source_order = {
+        "Rendimiento": 0,
+        "RENDIMIENTO": 0,
+        "Plat de fuerza": 1,
+        "PLATAFORMA DE FUERZA": 1,
+        "Mediciones": 2,
+        "MEDICIONES": 2,
+    }
+    normalized_metric = normalize_header(metric)
+    return (
+        source_order.get(str(source), 3),
+        MBD_METRIC_ORDER.get(normalized_metric, 1000),
+        normalized_metric,
+    )
 
 
 def mbd_result_color(row: Mapping[str, object]) -> tuple[str, str, str]:
@@ -1040,6 +1082,20 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     valid_results["_upper"] = (
         valid_results["ci_upper"] / valid_results["reference_sd"]
     )
+    sort_keys = [
+        mbd_metric_sort_key(
+            row.get("source", "Mediciones"),
+            row["metric"],
+        )
+        for _, row in valid_results.iterrows()
+    ]
+    valid_results["_source_sort"] = [key[0] for key in sort_keys]
+    valid_results["_metric_sort"] = [key[1] for key in sort_keys]
+    valid_results["_metric_name"] = [key[2] for key in sort_keys]
+    valid_results = valid_results.sort_values(
+        ["_source_sort", "_metric_sort", "_metric_name"],
+        kind="stable",
+    ).drop(columns=["_source_sort", "_metric_sort", "_metric_name"])
     valid_results["_label"] = valid_results["metric"].astype(str)
     if "source" in valid_results:
         duplicate_metrics = valid_results["metric"].duplicated(keep=False)
@@ -1078,7 +1134,7 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     figure.add_vrect(
         x0=-axis_limit,
         x1=-0.2,
-        fillcolor="rgba(39, 78, 123, 0.07)",
+        fillcolor="rgba(220, 38, 38, 0.11)",
         line_width=0,
         layer="below",
     )
@@ -1092,13 +1148,13 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     figure.add_vrect(
         x0=0.2,
         x1=axis_limit,
-        fillcolor="rgba(39, 78, 123, 0.07)",
+        fillcolor="rgba(34, 197, 94, 0.12)",
         line_width=0,
         layer="below",
     )
     figure.add_vline(x=0, line_color="#64748b", line_dash="dash")
-    figure.add_vline(x=-0.2, line_color="#9aa7b8", line_dash="dot")
-    figure.add_vline(x=0.2, line_color="#9aa7b8", line_dash="dot")
+    figure.add_vline(x=-0.2, line_color="#ef4444", line_dash="dash")
+    figure.add_vline(x=0.2, line_color="#22c55e", line_dash="dash")
     trace_styles = {
         "neutral": ("Sin dirección validada", "#274e7b"),
         "benefit_clear": ("Beneficioso · claro", "#166534"),
@@ -1162,6 +1218,50 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
                 ),
             )
         )
+    for _, row in valid_results.iterrows():
+        if pd.notna(row.get("p_benefit")):
+            percentages = (
+                f"{row['p_benefit']:.0%} · {row['p_trivial']:.0%} · "
+                f"{row['p_harm']:.0%}"
+            )
+        else:
+            percentages = (
+                f"{row['p_below_swc']:.0%} · {row['p_trivial']:.0%} · "
+                f"{row['p_above_swc']:.0%}"
+            )
+        classification, _, _ = mbd_result_color(row)
+        annotation_color = {
+            "benefit_clear": "#166534",
+            "benefit_unclear": "#4b8f5a",
+            "harm_clear": "#b91c1c",
+            "harm_unclear": "#a64b4b",
+            "trivial": "#64748b",
+            "neutral": "#64748b",
+        }.get(classification, "#64748b")
+        figure.add_annotation(
+            x=4.8,
+            y=row["_label"],
+            xref="x",
+            yref="y",
+            text=percentages,
+            showarrow=False,
+            xanchor="left",
+            font={"size": 10, "color": annotation_color},
+        )
+    for x_value, label, color in (
+        (-2.2, "Perjudicial", "#dc2626"),
+        (0, "Trivial", "#64748b"),
+        (2.2, "Beneficioso", "#16a34a"),
+    ):
+        figure.add_annotation(
+            x=x_value,
+            y=-0.16,
+            xref="x",
+            yref="paper",
+            text=label,
+            showarrow=False,
+            font={"size": 10, "color": color},
+        )
     figure.update_layout(
         template="plotly_white",
         font={
@@ -1172,7 +1272,8 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
         plot_bgcolor="rgba(0,0,0,0)",
         xaxis={
             "title": "Tamaño del efecto (SD) · SWC = ±0.2",
-            "range": [-axis_limit, axis_limit],
+            "range": [-axis_limit, 6.8],
+            "tickvals": [-4, -2, 0, 2, 4],
             "zeroline": False,
             "gridcolor": "#e5e7eb",
         },
@@ -1183,8 +1284,8 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
             "gridcolor": "#e5e7eb",
         },
         legend={"orientation": "h", "y": 1.12, "x": 0},
-        margin={"t": 65, "b": 60, "l": 150, "r": 25},
-        height=max(360, 110 + 52 * len(valid_results)),
+        margin={"t": 65, "b": 90, "l": 150, "r": 12},
+        height=max(360, 95 + 40 * len(valid_results)),
     )
     return figure
 
@@ -1219,11 +1320,7 @@ def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
     matrix = matrix.reindex(
         columns=sorted(
             matrix.columns,
-            key=lambda column: (
-                source_order.get(column[0], 3),
-                column[0],
-                column[1],
-            ),
+            key=lambda column: mbd_metric_sort_key(*column),
         )
     )
     matrix.index.name = "JUGADOR"
@@ -1233,104 +1330,98 @@ def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
 def _format_mbd_matrix_cell(row: pd.Series) -> str:
     if row["availability"] != "Disponible":
         return "No disponible"
-    if pd.notna(row.get("p_benefit")):
-        return (
-            f"{row['certainty']}\n{row['clarity']}\n"
-            f"Δ {row['change']:+.1f}"
-        )
-    return (
-        f"Δ {row['change']:+.1f}\n"
-        f"{row['p_below_swc']:.0%} / "
-        f"{row['p_trivial']:.0%} / "
-        f"{row['p_above_swc']:.0%}"
-    )
+    if pd.isna(row.get("p_benefit")):
+        return "Sin dirección validada"
+    if row["certainty"] == "Trivial":
+        return "Trivial"
+    return f"{row['certainty']}\n{row['clarity']}"
 
 
 def build_mbd_player_matrix_html(results: pd.DataFrame) -> str:
-    if results.empty:
-        return ""
-
     source_labels = {
         "Rendimiento": "RENDIMIENTO",
         "Plat de fuerza": "PLATAFORMA DE FUERZA",
         "Mediciones": "MEDICIONES",
     }
-    source_order = {
-        "Rendimiento": 0,
-        "Plat de fuerza": 1,
-        "Mediciones": 2,
+    matrix = build_mbd_player_matrix(results)
+    if matrix.empty:
+        return ""
+
+    indexed_results = {
+        (
+            str(row["player_name"]),
+            source_labels.get(str(row["source"]), str(row["source"]).upper()),
+            str(row["metric"]),
+        ): row
+        for _, row in results.iterrows()
     }
-    data = results.copy()
-    data["_source_order"] = data["source"].map(source_order).fillna(3)
-    data = data.sort_values(
-        ["_source_order", "source", "metric", "player_name"],
-        kind="stable",
-    )
+    source_spans: list[tuple[str, int]] = []
+    for source, _ in matrix.columns:
+        if source_spans and source_spans[-1][0] == source:
+            source_spans[-1] = (source, source_spans[-1][1] + 1)
+        else:
+            source_spans.append((source, 1))
+
     parts = [
         '<div class="ams-mbd-table-wrap"><table class="ams-mbd-table" '
         'aria-label="Resultados MBD por jugador, origen y variable">'
-        "<thead><tr>"
-        '<th>JUGADOR</th><th>ORIGEN · VARIABLE</th><th>CAMBIO · CLASIFICACIÓN</th>'
-        "<th>PROBABILIDADES / SWC</th></tr></thead><tbody>"
+        "<thead><tr><th class=\"ams-mbd-player\" rowspan=\"2\">JUGADOR</th>"
     ]
-    current_source = None
-    for _, result in data.iterrows():
-        source = str(result["source"])
-        if source != current_source:
-            current_source = source
-            source_label = source_labels.get(source, source.upper())
-            parts.append(
-                f'<tr><th class="ams-mbd-source" colspan="4">'
-                f"{html.escape(source_label)}</th></tr>"
-            )
-
-        classification, background, foreground = mbd_result_color(result)
-        player_name = html.escape(str(result["player_name"]))
-        metric = html.escape(str(result["metric"]))
-        tooltip = html.escape(str(result["availability"]), quote=True)
-        change = result.get("change")
-        if pd.notna(change):
-            change_text = f"Δ {float(change):+.1f}"
-        else:
-            change_text = "No disponible"
-
-        if classification in {
-            "benefit_clear",
-            "benefit_unclear",
-            "harm_clear",
-            "harm_unclear",
-        }:
-            classification_text = html.escape(str(result["certainty"]))
-            clarity = html.escape(str(result["clarity"]))
-            interpretation = (
-                f"{classification_text}<br>"
-                f'<span class="ams-mbd-clarity">{clarity}</span>'
-            )
-        elif classification == "neutral":
-            interpretation = "Sin dirección validada"
-        elif classification == "trivial":
-            interpretation = "Trivial"
-        else:
-            interpretation = "No disponible"
-
-        if result["availability"] == "Disponible":
-            probabilities = (
-                f"{result['p_below_swc']:.0%} / "
-                f"{result['p_trivial']:.0%} / "
-                f"{result['p_above_swc']:.0%}"
-            )
-        else:
-            probabilities = "—"
-        parts.append(
-            "<tr>"
-            f'<td class="ams-mbd-player-name">{player_name}</td>'
-            f'<td class="ams-mbd-metric">{metric}</td>'
-            f'<td title="{tooltip}" style="background:{background};'
-            f'color:{foreground}"><strong>{html.escape(change_text)}</strong>'
-            f"<br>{interpretation}</td>"
-            f'<td title="{tooltip}">{probabilities}</td>'
-            "</tr>"
+    for source, span in source_spans:
+        source_class = (
+            "rendimiento"
+            if source == "RENDIMIENTO"
+            else "fuerza"
+            if source == "PLATAFORMA DE FUERZA"
+            else "otro"
         )
+        parts.append(
+            f'<th class="ams-mbd-source ams-mbd-source--{source_class}" '
+            f'colspan="{span}">{html.escape(source)} ({span})</th>'
+        )
+    parts.append("</tr><tr>")
+    for source, metric in matrix.columns:
+        source_class = (
+            "rendimiento"
+            if source == "RENDIMIENTO"
+            else "fuerza"
+            if source == "PLATAFORMA DE FUERZA"
+            else "otro"
+        )
+        parts.append(
+            f'<th class="ams-mbd-metric ams-mbd-metric--{source_class}">'
+            f"{html.escape(str(metric))}</th>"
+        )
+    parts.append("</tr></thead><tbody>")
+
+    for player_name, row in matrix.iterrows():
+        parts.append(
+            f'<tr><th class="ams-mbd-player-name">'
+            f"{html.escape(str(player_name))}</th>"
+        )
+        for source, metric in matrix.columns:
+            value = str(row[(source, metric)])
+            original = indexed_results[
+                (str(player_name), str(source), str(metric))
+            ]
+            classification, background, foreground = mbd_result_color(original)
+            tooltip = html.escape(str(original["availability"]), quote=True)
+            cell_class = (
+                "ams-mbd-cell--neutral"
+                if classification == "neutral"
+                else "ams-mbd-cell--unavailable"
+                if classification == "unavailable"
+                else ""
+            )
+            text = "<br>".join(
+                html.escape(line) for line in value.splitlines()
+            )
+            parts.append(
+                f'<td class="ams-mbd-cell {cell_class}" title="{tooltip}" '
+                f'style="background:{background};color:{foreground}">'
+                f"{text}</td>"
+            )
+        parts.append("</tr>")
     parts.append("</tbody></table></div>")
     return "".join(parts)
 
@@ -1354,6 +1445,24 @@ def summarize_mbd_probabilities(results: pd.DataFrame) -> dict[str, int]:
             summary[labels[winners[0]]] += 1
         else:
             summary["Empate"] += 1
+    return summary
+
+
+def summarize_mbd_changes(results: pd.DataFrame) -> dict[str, int]:
+    available = results.loc[results["availability"].eq("Disponible")]
+    summary = {
+        "Beneficioso": 0,
+        "Perjudicial": 0,
+        "Trivial / No claro": 0,
+    }
+    for row in available.to_dict("records"):
+        classification, _, _ = mbd_result_color(row)
+        if classification == "benefit_clear":
+            summary["Beneficioso"] += 1
+        elif classification == "harm_clear":
+            summary["Perjudicial"] += 1
+        else:
+            summary["Trivial / No claro"] += 1
     return summary
 
 
@@ -1614,11 +1723,23 @@ def render_mbd_hopkins_tab(
             margin: 0 0 1.25rem;
         }
         .ams-mbd-summary {
-            background: #f3f6fa;
+            background: #f1f3f5;
             border: 1px solid #e3e9f1;
             border-radius: .75rem;
             margin-bottom: .6rem;
             padding: .8rem 1rem;
+        }
+        .ams-mbd-summary--benefit {
+            background: #edf7ed;
+            border-color: #d7edda;
+        }
+        .ams-mbd-summary--harm {
+            background: #fbecee;
+            border-color: #f3d9dd;
+        }
+        .ams-mbd-summary--unclear {
+            background: #f1f3f5;
+            border-color: #e2e8f0;
         }
         .ams-mbd-summary-label {
             color: #64748b;
@@ -1640,14 +1761,17 @@ def render_mbd_hopkins_tab(
         }
         .ams-mbd-table {
             border-collapse: collapse;
-            font-size: .8rem;
+            font-size: .68rem;
+            table-layout: fixed;
             width: 100%;
         }
         .ams-mbd-table th,
         .ams-mbd-table td {
             border: 1px solid #e2e8f0;
             overflow-wrap: anywhere;
-            padding: .5rem .65rem;
+            overflow-wrap: anywhere;
+            padding: .35rem .2rem;
+            text-align: center;
             vertical-align: middle;
         }
         .ams-mbd-table thead th {
@@ -1656,25 +1780,51 @@ def render_mbd_hopkins_tab(
             font-weight: 700;
         }
         .ams-mbd-table .ams-mbd-source {
-            background: #dce9f6;
-            color: #274e7b;
-            font-size: .67rem;
+            font-size: .7rem;
             letter-spacing: .025em;
-            text-align: left;
+            padding: .4rem .2rem;
         }
-        .ams-mbd-table td:nth-child(3),
-        .ams-mbd-table td:nth-child(4) {
-            text-align: center;
+        .ams-mbd-table .ams-mbd-source--rendimiento {
+            background: #bfdbfe;
+            color: #1d4ed8;
+        }
+        .ams-mbd-table .ams-mbd-source--fuerza {
+            background: #cce8c9;
+            color: #166534;
+        }
+        .ams-mbd-table .ams-mbd-source--otro {
+            background: #e2e8f0;
+            color: #475569;
+        }
+        .ams-mbd-table .ams-mbd-metric--rendimiento {
+            background: #eff6ff;
+            color: #1e40af;
+        }
+        .ams-mbd-table .ams-mbd-metric--fuerza {
+            background: #f0f7ef;
+            color: #166534;
+        }
+        .ams-mbd-table .ams-mbd-metric--otro {
+            background: #f8fafc;
+            color: #475569;
+        }
+        .ams-mbd-table .ams-mbd-player {
+            background: #f8fafc;
+            width: 82px;
         }
         .ams-mbd-table .ams-mbd-player-name {
             color: #334155;
             font-weight: 650;
-            white-space: nowrap;
+            overflow-wrap: anywhere;
         }
-        .ams-mbd-table .ams-mbd-metric {
-            background: #f8fafc;
-            color: #334155;
-            font-weight: 600;
+        .ams-mbd-table .ams-mbd-cell {
+            font-weight: 650;
+            line-height: 1.15;
+        }
+        .ams-mbd-table .ams-mbd-cell--neutral,
+        .ams-mbd-table .ams-mbd-cell--unavailable {
+            font-size: .61rem;
+            font-weight: 500;
         }
         .ams-mbd-clarity {
             display: inline-block;
@@ -1824,8 +1974,8 @@ def render_mbd_hopkins_tab(
     )
     st.markdown("**Resultados por jugador y variable**")
     st.caption(
-        "Las variables con dirección definida muestran certeza y claridad; "
-        "las demás conservan cambio y probabilidades neutrales."
+        "Clasificación Will Hopkins por variable. Los tonos suaves indican "
+        "un resultado NO CLARO; las variables sin dirección validada quedan neutrales."
     )
     st.markdown(
         build_mbd_player_matrix_html(results),
@@ -1849,42 +1999,46 @@ def render_mbd_hopkins_tab(
         )
         return
 
-    summary = summarize_mbd_probabilities(available_results)
-    variable_count = len(available_results)
-    plot_column, summary_column = st.columns([2.5, 1], gap="medium")
+    summary = summarize_mbd_changes(available_results)
+    variable_count = sum(summary.values())
+    plot_column, summary_column = st.columns([2.2, 1], gap="medium")
     with plot_column:
+        st.caption(
+            "En el gráfico, las probabilidades se muestran en el orden "
+            "beneficioso / trivial / perjudicial; las variables neutrales "
+            "muestran < −SWC / trivial / > +SWC."
+        )
         st.plotly_chart(
             build_mbd_forest_plot(available_results),
             use_container_width=True,
             config={"displayModeBar": False},
         )
     with summary_column:
-        st.markdown("**Resumen de probabilidades**")
+        st.markdown("**Resumen de cambios**")
         for label, color in (
-            ("Menor que −SWC", "#274E7B"),
-            ("Dentro de ±SWC", "#64748B"),
-            ("Mayor que +SWC", "#274E7B"),
+            ("Beneficioso", "#166534"),
+            ("Perjudicial", "#b91c1c"),
+            ("Trivial / No claro", "#64748b"),
         ):
             count = summary[label]
-            percentage = count / variable_count * 100
+            percentage = count / variable_count * 100 if variable_count else 0
+            card_class = {
+                "Beneficioso": "benefit",
+                "Perjudicial": "harm",
+                "Trivial / No claro": "unclear",
+            }[label]
             st.markdown(
                 f"""
-                <div class="ams-mbd-summary">
+                <div class="ams-mbd-summary ams-mbd-summary--{card_class}">
                   <div class="ams-mbd-summary-label" style="color:{color}">
                     {label}
                   </div>
                   <div class="ams-mbd-summary-value">
-                    {count} <span style="font-size:.85rem;color:#64748b">
-                    ({percentage:.0f}% de variables)</span>
+                    {count} ({percentage:.0f}%)
                   </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
-            )
-        if summary["Empate"]:
-            st.caption(
-                f"{summary['Empate']} variable(s) tienen probabilidades "
-                "empatadas entre zonas."
             )
 
     with st.expander("Ver cálculos detallados"):

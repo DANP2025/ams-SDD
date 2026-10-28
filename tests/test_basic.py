@@ -10,6 +10,7 @@ from app import (
     build_z_score_radar,
     calculate_mbd_hopkins,
     calculate_z_scores,
+    summarize_mbd_changes,
     build_mbd_player_matrix_html,
     canonicalize_headers,
     classify_mbd_clarity,
@@ -132,7 +133,7 @@ def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
         ("RENDIMIENTO", "VO2 max"),
         ("PLATAFORMA DE FUERZA", "Fuerza CMJ"),
     ]
-    assert matrix.iloc[0, 0] == "Δ +2.0\n10% / 20% / 70%"
+    assert matrix.iloc[0, 0] == "Sin dirección validada"
     assert matrix.iloc[0, 1] == "No disponible"
 
 
@@ -175,16 +176,46 @@ def test_mbd_matrix_html_colors_will_hopkins_labels_without_inner_scrolling():
     table = build_mbd_player_matrix_html(results)
 
     assert 'class="ams-mbd-table-wrap"' in table
-    assert "Muy Probable Beneficioso<br>" in table
-    assert "CLARO</span></td>" in table
-    assert "Probable Perjudicial<br>" in table
-    assert "NO CLARO</span></td>" in table
-    assert "<th>JUGADOR</th>" in table
-    assert "<th>ORIGEN · VARIABLE</th>" in table
-    assert "70% / 20% / 10%" in table
+    assert 'rowspan="2">JUGADOR</th>' in table
+    assert 'colspan="1">RENDIMIENTO (1)</th>' in table
+    assert 'colspan="1">PLATAFORMA DE FUERZA (1)</th>' in table
+    assert "Muy Probable Beneficioso<br>CLARO" in table
+    assert "Probable Perjudicial<br>NO CLARO" in table
+    assert "70% / 20% / 10%" not in table
+    assert "Δ " not in table
     assert 'background:#166534;color:#ffffff' in table
     assert 'background:#fee2e2;color:#991b1b' in table
     assert "Alt. Salto" in table
+
+
+def test_mbd_matrix_html_has_players_as_rows_and_variables_as_columns():
+    results = pd.DataFrame(
+        [
+            {
+                "player_id": player_id,
+                "player_name": player_name,
+                "source": "Rendimiento",
+                "metric": "VO2 max",
+                "change": 0.1,
+                "p_benefit": 0.8,
+                "p_harm": 0.01,
+                "certainty": "Probable Beneficioso",
+                "clarity": "CLARO",
+                "availability": "Disponible",
+                "p_below_swc": 0.01,
+                "p_trivial": 0.19,
+                "p_above_swc": 0.8,
+            }
+            for player_id, player_name in (("p1", "Ana Uno"), ("p2", "Beto Dos"))
+        ]
+    )
+
+    table = build_mbd_player_matrix_html(results)
+
+    assert table.count("<tr>") == 4
+    assert table.count('class="ams-mbd-cell ') == 2
+    assert "Ana Uno" in table and "Beto Dos" in table
+    assert "Δ" not in table
 
 
 def test_mbd_direction_catalog_normalizes_metrics_and_leaves_ambiguous_neutral():
@@ -215,12 +246,16 @@ def test_mbd_forest_plot_bounds_extreme_effects_and_marks_them():
 
     figure = build_mbd_forest_plot(results)
 
-    assert tuple(figure.layout.xaxis.range) == (-4.5, 4.5)
+    assert tuple(figure.layout.xaxis.range) == (-4.5, 6.8)
     assert figure.data[0].x[0] == 4.5
     assert figure.data[0].marker.symbol[0] == "triangle-right"
     assert figure.data[0].customdata[0][1] == 20.0
     assert figure.data[0].customdata[0][2] == 18.0
     assert figure.data[0].customdata[0][3] == 22.0
+    annotations = [annotation.text for annotation in figure.layout.annotations]
+    assert "0% · 0% · 100%" in annotations
+    assert "Perjudicial" in annotations
+    assert "Beneficioso" in annotations
 
 
 def test_mbd_forest_plot_colors_outcomes_and_grows_to_show_all_rows():
@@ -262,7 +297,67 @@ def test_mbd_forest_plot_colors_outcomes_and_grows_to_show_all_rows():
     assert trace_by_name["Beneficioso · no claro"].marker.color == "#86c995"
     assert trace_by_name["Perjudicial · claro"].marker.color == "#b91c1c"
     assert sum(len(trace.x) for trace in figure.data) == len(results)
-    assert figure.layout.height > 850
+    assert figure.layout.height > 800
+    fills = {
+        shape.fillcolor for shape in figure.layout.shapes if shape.type == "rect"
+    }
+    assert "rgba(220, 38, 38, 0.11)" in fills
+    assert "rgba(34, 197, 94, 0.12)" in fills
+
+
+def test_mbd_change_summary_groups_clear_direction_and_unclear_results():
+    results = pd.DataFrame(
+        [
+            {
+                "availability": "Disponible",
+                "certainty": "Muy Probable Beneficioso",
+                "clarity": "CLARO",
+                "p_benefit": 0.97,
+                "p_harm": 0.01,
+            },
+            {
+                "availability": "Disponible",
+                "certainty": "Probable Perjudicial",
+                "clarity": "CLARO",
+                "p_benefit": 0.01,
+                "p_harm": 0.8,
+            },
+            {
+                "availability": "Disponible",
+                "certainty": "Posible Beneficioso",
+                "clarity": "NO CLARO",
+                "p_benefit": 0.4,
+                "p_harm": 0.3,
+            },
+            {
+                "availability": "Disponible",
+                "certainty": "Trivial",
+                "clarity": "CLARO",
+                "p_benefit": 0.2,
+                "p_harm": 0.2,
+            },
+            {
+                "availability": "Disponible",
+                "certainty": "Sin dirección validada",
+                "clarity": "Sin dirección validada",
+                "p_benefit": float("nan"),
+                "p_harm": float("nan"),
+            },
+            {
+                "availability": "Falta una medición Pre o Post.",
+                "certainty": "No disponible",
+                "clarity": "No disponible",
+                "p_benefit": float("nan"),
+                "p_harm": float("nan"),
+            },
+        ]
+    )
+
+    assert summarize_mbd_changes(results) == {
+        "Beneficioso": 1,
+        "Perjudicial": 1,
+        "Trivial / No claro": 3,
+    }
 
 
 def test_mbd_probability_summary_counts_unique_most_likely_zones_and_ties():
