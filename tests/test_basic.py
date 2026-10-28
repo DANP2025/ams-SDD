@@ -137,6 +137,46 @@ def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
     assert matrix.iloc[0, 1] == "No disponible"
 
 
+def test_mbd_results_and_visuals_exclude_age_and_weight_metrics():
+    rows = []
+    for metric in ("VO2 max", "Age", "Edad", "Peso", "weight"):
+        for player_id, player_name, pre_value, post_value in (
+            ("p1", "Ana Uno", 10.0, 12.0),
+            ("p2", "Beto Dos", 14.0, 15.0),
+        ):
+            for date, value in (
+                ("2026-01-10", pre_value),
+                ("2026-02-10", post_value),
+            ):
+                rows.append(
+                    {
+                        "player_id": player_id,
+                        "player_name": player_name,
+                        "date": pd.Timestamp(date),
+                        "category": "U18",
+                        "metric": metric,
+                        "value": value,
+                        "source": "Rendimiento",
+                    }
+                )
+
+    results = calculate_mbd_hopkins(
+        pd.DataFrame(rows),
+        ["p1"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+    )
+
+    assert results["metric"].tolist() == ["VO2 max"]
+    assert build_mbd_player_matrix(results).columns.tolist() == [
+        ("RENDIMIENTO", "VO2 max")
+    ]
+    figure = build_mbd_forest_plot(results)
+    plotted_metrics = [metric for trace in figure.data for metric in trace.y]
+    assert plotted_metrics == ["VO2 max"]
+
+
 def test_mbd_matrix_html_colors_will_hopkins_labels_without_inner_scrolling():
     results = pd.DataFrame(
         [
@@ -179,8 +219,8 @@ def test_mbd_matrix_html_colors_will_hopkins_labels_without_inner_scrolling():
     assert 'rowspan="2">JUGADOR</th>' in table
     assert 'colspan="1">RENDIMIENTO (1)</th>' in table
     assert 'colspan="1">PLATAFORMA DE FUERZA (1)</th>' in table
-    assert "Muy Probable Beneficioso<br>CLARO" in table
-    assert "Probable Perjudicial<br>NO CLARO" in table
+    assert "Muy Probable<br>Beneficioso<br>CLARO" in table
+    assert "Probable<br>Perjudicial<br>NO CLARO" in table
     assert "70% / 20% / 10%" not in table
     assert "Δ " not in table
     assert 'background:#166534;color:#ffffff' in table
@@ -678,6 +718,20 @@ def test_z_score_matrix_keeps_full_precision_for_display_formatting():
     assert matrix.loc[0, "VO2 max"] == pytest.approx(1.234)
 
 
+def test_z_score_matrix_excludes_age_and_weight_metrics():
+    results = pd.DataFrame(
+        [
+            {"player_id": "p1", "player_name": "Ana Uno", "metric": metric,
+             "z_score": 1.0}
+            for metric in ("VO2 max", "Age", "Edad", "Peso", "weight")
+        ]
+    )
+
+    matrix = build_z_score_matrix(results)
+
+    assert matrix.columns.tolist() == ["Jugador", "VO2 max"]
+
+
 def test_z_score_cell_style_uses_classification_colors_and_readable_text():
     assert "background-color: #4CAF50" in z_score_cell_style(1.5)
     assert "color: #FFFFFF" in z_score_cell_style(1.5)
@@ -847,3 +901,22 @@ def test_calculate_z_scores_excludes_zero_and_reports_insufficient_reference():
     assert vo2["reference_count"] == 2
     assert pd.isna(strength["z_score"])
     assert strength["classification"] == "No disponible"
+
+
+def test_calculate_z_scores_excludes_age_and_weight_metrics():
+    measurements = pd.DataFrame(
+        [
+            {"player_id": player_id, "player_name": player_name,
+             "category": "U21", "metric": metric, "value": value}
+            for metric in ("VO2 max", "Age", "Edad", "Peso", "weight")
+            for player_id, player_name, value in (
+                ("p1", "Ana Uno", 10.0),
+                ("r1", "Ref Uno", 8.0),
+                ("r2", "Ref Dos", 12.0),
+            )
+        ]
+    )
+
+    result = calculate_z_scores(measurements, ["p1"], "U21")
+
+    assert result["metric"].tolist() == ["VO2 max"]

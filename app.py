@@ -14,6 +14,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 WORKSHEETS = ("Base de datos", "Rendimiento", "Plat de fuerza")
 MBD_ICC = 0.90
+EXCLUDED_DISPLAY_METRICS = {"age", "edad", "peso", "weight"}
 MBD_METRIC_ORDER = {
     "vo2 max": 0,
     "vo2max": 0,
@@ -181,6 +182,10 @@ def normalize_header(value: object) -> str:
         character for character in decomposed if not unicodedata.combining(character)
     )
     return re.sub(r"[^a-z0-9]+", " ", without_accents.casefold()).strip()
+
+
+def is_excluded_display_metric(metric: object) -> bool:
+    return normalize_header(metric) in EXCLUDED_DISPLAY_METRICS
 
 
 def lookup_mbd_direction(
@@ -363,6 +368,9 @@ def z_score_cell_style(value: float) -> str:
 
 
 def build_z_score_matrix(results: pd.DataFrame) -> pd.DataFrame:
+    results = results.loc[
+        ~results["metric"].map(is_excluded_display_metric)
+    ].copy()
     if results.empty:
         return pd.DataFrame(columns=["Jugador"])
 
@@ -627,10 +635,18 @@ def render_dashboard_header() -> None:
             border: 1px solid #e5e9ef;
             border-radius: 11px;
             background: #ffffff;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+            transition: border-color 180ms ease, box-shadow 180ms ease,
+                transform 180ms ease;
+        }
+        .ams-stat:hover {
+            border-color: #cbd8e6;
+            box-shadow: 0 5px 16px rgba(30, 64, 175, 0.08);
+            transform: translateY(-1px);
         }
         .ams-stat-label {
             color: #718096;
-            font-size: 0.7rem;
+            font-size: 0.68rem;
             font-weight: 700;
             letter-spacing: 0.07em;
             text-transform: uppercase;
@@ -638,7 +654,7 @@ def render_dashboard_header() -> None:
         .ams-stat-value {
             margin-top: 0.4rem;
             color: #17212b;
-            font-size: 1.2rem;
+            font-size: 1.12rem;
             font-weight: 700;
             letter-spacing: -0.035em;
         }
@@ -912,6 +928,9 @@ def calculate_mbd_hopkins(
         data["category"].eq(category)
         & data["_month"].isin([pre_month, post_month])
     ]
+    relevant = relevant.loc[
+        ~relevant["metric"].map(is_excluded_display_metric)
+    ]
     metric_sources = (
         relevant[["source", "metric"]]
         .dropna()
@@ -1068,7 +1087,8 @@ def calculate_mbd_hopkins(
 
 def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     valid_results = results.loc[
-        results["change"].notna()
+        ~results["metric"].map(is_excluded_display_metric)
+        & results["change"].notna()
         & results["ci_lower"].notna()
         & results["ci_upper"].notna()
         & results["swc"].gt(0)
@@ -1291,7 +1311,9 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
 
 
 def build_mbd_player_matrix(results: pd.DataFrame) -> pd.DataFrame:
-    data = results.copy()
+    data = results.loc[
+        ~results["metric"].map(is_excluded_display_metric)
+    ].copy()
     data["cell"] = data.apply(
         _format_mbd_matrix_cell,
         axis=1,
@@ -1334,7 +1356,14 @@ def _format_mbd_matrix_cell(row: pd.Series) -> str:
         return "Neutral"
     if row["certainty"] == "Trivial":
         return "Trivial"
-    return f"{row['certainty']}\n{row['clarity']}"
+    certainty_parts = str(row["certainty"]).split()
+    if len(certainty_parts) >= 2:
+        certainty = "\n".join(
+            [" ".join(certainty_parts[:-1]), certainty_parts[-1]]
+        )
+    else:
+        certainty = str(row["certainty"])
+    return f"{certainty}\n{row['clarity']}"
 
 
 def build_mbd_player_matrix_html(results: pd.DataFrame) -> str:
@@ -1492,7 +1521,11 @@ def calculate_z_scores(
     if measurements.empty or not selected_ids:
         return pd.DataFrame(columns=result_columns)
 
-    metrics = sorted(measurements["metric"].dropna().unique())
+    metrics = sorted(
+        metric
+        for metric in measurements["metric"].dropna().unique()
+        if not is_excluded_display_metric(metric)
+    )
     target_rows = measurements.loc[
         measurements["player_id"].astype(str).isin(selected_ids)
     ].drop_duplicates(["player_id", "metric"], keep="last")
@@ -1730,9 +1763,16 @@ def render_mbd_hopkins_tab(
         .ams-mbd-summary {
             background: #f1f3f5;
             border: 1px solid #e3e9f1;
-            border-radius: .75rem;
-            margin-bottom: .6rem;
-            padding: .8rem 1rem;
+            border-radius: .65rem;
+            margin-bottom: .5rem;
+            padding: .65rem .8rem;
+            transition: border-color 180ms ease, box-shadow 180ms ease,
+                transform 180ms ease;
+        }
+        .ams-mbd-summary:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, .07);
+            transform: translateY(-1px);
         }
         .ams-mbd-summary--benefit {
             background: #edf7ed;
@@ -1748,13 +1788,13 @@ def render_mbd_hopkins_tab(
         }
         .ams-mbd-summary-label {
             color: #64748b;
-            font-size: .75rem;
+            font-size: .7rem;
             font-weight: 600;
             letter-spacing: .03em;
         }
         .ams-mbd-summary-value {
             color: #17212b;
-            font-size: 1.25rem;
+            font-size: 1.12rem;
             font-weight: 700;
             margin-top: .2rem;
         }
@@ -1815,17 +1855,24 @@ def render_mbd_hopkins_tab(
         }
         .ams-mbd-table .ams-mbd-player {
             background: #f8fafc;
-            width: 82px;
+            width: 112px;
         }
         .ams-mbd-table .ams-mbd-player-name {
             color: #334155;
             font-weight: 650;
-            overflow-wrap: anywhere;
-            word-break: normal;
+            overflow-wrap: normal;
+            white-space: normal;
+            word-break: keep-all;
         }
         .ams-mbd-table .ams-mbd-cell {
+            font-size: .64rem;
             font-weight: 650;
             line-height: 1.15;
+            transition: box-shadow 160ms ease, filter 160ms ease;
+        }
+        .ams-mbd-table .ams-mbd-cell:hover {
+            box-shadow: inset 0 0 0 2px rgba(39, 78, 123, .24);
+            filter: saturate(1.08);
         }
         .ams-mbd-table .ams-mbd-cell--neutral,
         .ams-mbd-table .ams-mbd-cell--unavailable {
@@ -1841,7 +1888,7 @@ def render_mbd_hopkins_tab(
                 padding: .25rem .1rem;
             }
             .ams-mbd-table .ams-mbd-player {
-                width: 64px;
+                width: 88px;
             }
             .ams-mbd-table .ams-mbd-cell--neutral,
             .ams-mbd-table .ams-mbd-cell--unavailable {
@@ -2395,6 +2442,12 @@ def main() -> None:
                                 hide_index=True,
                                 use_container_width=True,
                                 height=min(38 + 35 * len(table), 650),
+                                column_config={
+                                    "Jugador": st.column_config.TextColumn(
+                                        "Jugador",
+                                        width="large",
+                                    )
+                                },
                             )
 
                         legend_items = [
