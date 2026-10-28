@@ -570,12 +570,18 @@ def render_dashboard_stat(label: str, value: str) -> None:
 
 def prepare_monthly_measurements(
     sheets: Mapping[str, pd.DataFrame],
-) -> tuple[pd.DataFrame, int]:
+) -> tuple[pd.DataFrame, int, dict[str, dict[str, int]]]:
     measurement_frames = []
-    excluded_rows = 0
+    diagnostics = {}
 
     for worksheet_name in ("Rendimiento", "Plat de fuerza"):
         frame = sheets[worksheet_name].copy()
+        non_empty_rows = pd.Series(False, index=frame.index)
+        for column in frame.columns:
+            has_value = frame[column].astype("string").str.strip().ne("").fillna(False)
+            non_empty_rows |= has_value
+        frame = frame.loc[non_empty_rows].copy()
+
         date_text = frame["date"].astype("string").str.strip()
         iso_dates = date_text.str.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
         parsed_dates = pd.to_datetime(date_text, errors="coerce", dayfirst=True)
@@ -588,14 +594,24 @@ def prepare_monthly_measurements(
         frame["category"] = frame["category"].astype("string").str.strip()
         frame["player_id"] = frame["player_id"].astype("string").str.strip()
 
-        valid_keys = (
-            frame["player_id"].notna()
-            & frame["player_id"].ne("")
-            & frame["date"].notna()
-            & frame["category"].notna()
-            & frame["category"].ne("")
+        missing_player = frame["player_id"].isna() | frame["player_id"].eq("")
+        invalid_date = frame["date"].isna()
+        missing_category = frame["category"].isna() | frame["category"].eq("")
+        issue_count = (
+            missing_player.astype(int)
+            + invalid_date.astype(int)
+            + missing_category.astype(int)
         )
-        excluded_rows += int((~valid_keys).sum())
+        valid_keys = issue_count.eq(0)
+        excluded_rows = int((~valid_keys).sum())
+        diagnostics[worksheet_name] = {
+            "rows": len(frame),
+            "excluded": excluded_rows,
+            "missing_player": int(missing_player.sum()),
+            "invalid_date": int(invalid_date.sum()),
+            "missing_category": int(missing_category.sum()),
+            "multiple_issues": int(issue_count.gt(1).sum()),
+        }
         frame = frame.loc[valid_keys].copy()
 
         key_columns = {"player_id", "date", "category"}
@@ -630,8 +646,11 @@ def prepare_monthly_measurements(
         measurement_frames.append(grouped)
 
     columns = ["player_id", "player_name", "date", "category", "metric", "value"]
+    excluded_rows = sum(
+        values["excluded"] for values in diagnostics.values()
+    )
     if not measurement_frames:
-        return pd.DataFrame(columns=columns), excluded_rows
+        return pd.DataFrame(columns=columns), excluded_rows, diagnostics
 
     measurements = pd.concat(measurement_frames, ignore_index=True)
     measurements["_month"] = measurements["date"].dt.to_period("M")
@@ -662,7 +681,7 @@ def prepare_monthly_measurements(
     measurements.loc[
         measurements["player_name"].eq(""), "player_name"
     ] = "Jugador sin nombre"
-    return measurements[columns], excluded_rows
+    return measurements[columns], excluded_rows, diagnostics
 
 
 def calculate_z_scores(
@@ -955,13 +974,40 @@ def main() -> None:
         st.stop()
 
     sheets = standardize_sheets_with_mapping(raw_sheets)
-    measurements, excluded_rows = prepare_monthly_measurements(sheets)
+    measurements, excluded_rows, data_diagnostics = prepare_monthly_measurements(
+        sheets
+    )
     if excluded_rows:
         formatted_excluded_rows = f"{excluded_rows:,}".replace(",", ".")
         st.caption(
             f"Filas incompletas omitidas: {formatted_excluded_rows} "
             "(sin jugador, fecha o categoría)."
         )
+        diagnostics_table = pd.DataFrame(
+            [
+                {
+                    "Pestaña": worksheet_name,
+                    "Filas revisadas": values["rows"],
+                    "Sin jugador": values["missing_player"],
+                    "Fecha no reconocida": values["invalid_date"],
+                    "Sin categoría": values["missing_category"],
+                    "Con varios problemas": values["multiple_issues"],
+                    "Excluidas": values["excluded"],
+                }
+                for worksheet_name, values in data_diagnostics.items()
+            ]
+        )
+        with st.expander("Ver diagnóstico de calidad de datos"):
+            st.caption(
+                "Este resumen solo muestra cantidades; no presenta nombres, "
+                "identificadores ni valores de jugadores. Los motivos pueden "
+                "coincidir en una misma fila."
+            )
+            st.dataframe(
+                diagnostics_table,
+                hide_index=True,
+                use_container_width=True,
+            )
 
     zscore_tab, mbd_tab, swc_tab = st.tabs(
         ["Z-Score / Extrapolar", "MBD Hopkins", "SWC"]

@@ -242,7 +242,7 @@ def test_prepare_measurements_uses_latest_value_per_player_and_month():
         ),
     }
 
-    frame, excluded_rows = prepare_monthly_measurements(sheets)
+    frame, excluded_rows, diagnostics = prepare_monthly_measurements(sheets)
 
     ana_vo2 = frame.loc[
         (frame["player_id"] == "001") & (frame["metric"] == "VO2 max"),
@@ -250,6 +250,66 @@ def test_prepare_measurements_uses_latest_value_per_player_and_month():
     ].item()
     assert ana_vo2 == 50
     assert excluded_rows == 1
+    assert diagnostics["Rendimiento"] == {
+        "rows": 4,
+        "excluded": 1,
+        "missing_player": 0,
+        "invalid_date": 1,
+        "missing_category": 0,
+        "multiple_issues": 0,
+    }
+
+
+def test_prepare_measurements_reports_overlapping_missing_fields_and_ignores_blank_rows():
+    sheets = {
+        "Base de datos": standardize_sheet(
+            "Base de datos",
+            [
+                ["DNI", "Nombre", "Apellido", "Categoria"],
+                ["001", "Ana", "Uno", "U18"],
+            ],
+        ),
+        "Rendimiento": standardize_sheet(
+            "Rendimiento",
+            [
+                ["DNI", "Fecha", "Categoria", "VO2 max"],
+                ["", "", "", ""],
+                ["", "2026-03-01", "U18", "52"],
+                ["002", "fecha inválida", "", "53"],
+                ["003", "2026-03-05", "U18", "54"],
+            ],
+        ),
+        "Plat de fuerza": standardize_sheet(
+            "Plat de fuerza",
+            [
+                ["DNI", "Fecha", "Categoria", "Fuerza"],
+                ["  ", "  ", "  ", "  "],
+            ],
+        ),
+    }
+
+    measurements, excluded_rows, diagnostics = prepare_monthly_measurements(
+        sheets
+    )
+
+    assert excluded_rows == 2
+    assert len(measurements) == 1
+    assert diagnostics["Rendimiento"] == {
+        "rows": 3,
+        "excluded": 2,
+        "missing_player": 1,
+        "invalid_date": 1,
+        "missing_category": 1,
+        "multiple_issues": 1,
+    }
+    assert diagnostics["Plat de fuerza"] == {
+        "rows": 0,
+        "excluded": 0,
+        "missing_player": 0,
+        "invalid_date": 0,
+        "missing_category": 0,
+        "multiple_issues": 0,
+    }
 
 
 def test_calculate_z_scores_excludes_zero_and_reports_insufficient_reference():
