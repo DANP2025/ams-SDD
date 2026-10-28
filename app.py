@@ -1221,12 +1221,12 @@ def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
     for _, row in valid_results.iterrows():
         if pd.notna(row.get("p_benefit")):
             percentages = (
-                f"{row['p_benefit']:.0%} · {row['p_trivial']:.0%} · "
+                f"{row['p_benefit']:.0%}/{row['p_trivial']:.0%}/"
                 f"{row['p_harm']:.0%}"
             )
         else:
             percentages = (
-                f"{row['p_below_swc']:.0%} · {row['p_trivial']:.0%} · "
+                f"{row['p_below_swc']:.0%}/{row['p_trivial']:.0%}/"
                 f"{row['p_above_swc']:.0%}"
             )
         classification, _, _ = mbd_result_color(row)
@@ -1331,7 +1331,7 @@ def _format_mbd_matrix_cell(row: pd.Series) -> str:
     if row["availability"] != "Disponible":
         return "No disponible"
     if pd.isna(row.get("p_benefit")):
-        return "Sin dirección validada"
+        return "Neutral"
     if row["certainty"] == "Trivial":
         return "Trivial"
     return f"{row['certainty']}\n{row['clarity']}"
@@ -1405,7 +1405,12 @@ def build_mbd_player_matrix_html(results: pd.DataFrame) -> str:
                 (str(player_name), str(source), str(metric))
             ]
             classification, background, foreground = mbd_result_color(original)
-            tooltip = html.escape(str(original["availability"]), quote=True)
+            tooltip_text = (
+                "Sin dirección deseable validada; interpretación neutral."
+                if classification == "neutral"
+                else str(original["availability"])
+            )
+            tooltip = html.escape(tooltip_text, quote=True)
             cell_class = (
                 "ams-mbd-cell--neutral"
                 if classification == "neutral"
@@ -1768,8 +1773,8 @@ def render_mbd_hopkins_tab(
         .ams-mbd-table th,
         .ams-mbd-table td {
             border: 1px solid #e2e8f0;
-            overflow-wrap: anywhere;
-            overflow-wrap: anywhere;
+            overflow-wrap: normal;
+            word-break: normal;
             padding: .35rem .2rem;
             text-align: center;
             vertical-align: middle;
@@ -1816,6 +1821,7 @@ def render_mbd_hopkins_tab(
             color: #334155;
             font-weight: 650;
             overflow-wrap: anywhere;
+            word-break: normal;
         }
         .ams-mbd-table .ams-mbd-cell {
             font-weight: 650;
@@ -1825,6 +1831,22 @@ def render_mbd_hopkins_tab(
         .ams-mbd-table .ams-mbd-cell--unavailable {
             font-size: .61rem;
             font-weight: 500;
+        }
+        @media (max-width: 1150px) {
+            .ams-mbd-table {
+                font-size: .52rem;
+            }
+            .ams-mbd-table th,
+            .ams-mbd-table td {
+                padding: .25rem .1rem;
+            }
+            .ams-mbd-table .ams-mbd-player {
+                width: 64px;
+            }
+            .ams-mbd-table .ams-mbd-cell--neutral,
+            .ams-mbd-table .ams-mbd-cell--unavailable {
+                font-size: .48rem;
+            }
         }
         .ams-mbd-clarity {
             display: inline-block;

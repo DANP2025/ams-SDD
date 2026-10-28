@@ -133,7 +133,7 @@ def test_mbd_matrix_groups_metrics_by_source_and_shows_neutral_probabilities():
         ("RENDIMIENTO", "VO2 max"),
         ("PLATAFORMA DE FUERZA", "Fuerza CMJ"),
     ]
-    assert matrix.iloc[0, 0] == "Sin dirección validada"
+    assert matrix.iloc[0, 0] == "Neutral"
     assert matrix.iloc[0, 1] == "No disponible"
 
 
@@ -253,7 +253,7 @@ def test_mbd_forest_plot_bounds_extreme_effects_and_marks_them():
     assert figure.data[0].customdata[0][2] == 18.0
     assert figure.data[0].customdata[0][3] == 22.0
     annotations = [annotation.text for annotation in figure.layout.annotations]
-    assert "0% · 0% · 100%" in annotations
+    assert "0%/0%/100%" in annotations
     assert "Perjudicial" in annotations
     assert "Beneficioso" in annotations
 
