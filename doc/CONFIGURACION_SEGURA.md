@@ -25,9 +25,12 @@ filas reales del Google Sheet.
 3. En **IAM y administración → Cuentas de servicio**, crea una cuenta de servicio.
 4. Crea una clave JSON y guárdala localmente en un lugar privado. No la subas a
    GitHub ni la envíes por chat.
-5. Abre el JSON y copia los valores de sus campos en la sección
-   `[gcp_service_account]` de la plantilla de secretos.
-6. Comparte el Google Sheet privado con el correo `client_email` de esa cuenta
+5. Abre el JSON en tu computadora. Comprueba que `"type"` sea
+   `"service_account"`. No pegues el JSON completo con llaves `{}`, comas y dos
+   puntos: Streamlit Secrets utiliza formato TOML.
+6. Copia los campos del JSON a la sección `[gcp_service_account]` que se muestra
+   en la guía de abajo. Conserva los nombres de campo y las comillas TOML.
+7. Comparte el Google Sheet privado con el correo `client_email` de esa cuenta
    de servicio y dale permiso **Lector**. No cambies el acceso general del Sheet
    a público.
 
@@ -39,7 +42,9 @@ filas reales del Google Sheet.
    Streamlit Community Cloud muestre para esta app, terminada en
    `/oauth2callback`.
 4. Copia el ID de cliente y el secreto de cliente directamente a la sección
-   `[auth]` de los secretos de Streamlit. Nunca los guardes en `app.py`.
+   `[auth]` de los secretos de Streamlit. Son valores OAuth distintos del
+   `client_id` que aparece dentro del JSON de la cuenta de servicio. Nunca los
+   guardes en `app.py`.
 
 El inicio de sesión Google no requiere una contraseña compartida dentro del AMS.
 Cada persona usa su propia cuenta Google. Solo las cuentas incluidas en
@@ -47,12 +52,11 @@ Cada persona usa su propia cuenta Google. Solo las cuentas incluidas en
 
 ## 4. Configurar Streamlit Community Cloud
 
-1. En Streamlit Community Cloud, crea la app desde el repositorio privado de
-   GitHub y selecciona `app.py` como archivo principal.
-2. Abre la app en Streamlit y entra en **Settings → Secrets**.
-3. Copia el contenido de `.streamlit/secrets.example.toml` en el editor de
-   secretos de Streamlit. Completa los marcadores con los valores de Google
-   Cloud, el ID de la hoja y las cuentas autorizadas.
+1. En Streamlit Community Cloud, abre la app creada desde
+   `DANP2025/ams-SDD`, con `app.py` como archivo principal.
+2. En la app, abre **Manage app → menú de tres puntos → Settings → Secrets**.
+3. Completa los secretos con los valores de Google Cloud, el ID de la hoja y
+   las cuentas autorizadas. La sección de formato más abajo muestra los campos.
 4. Genera un valor secreto aleatorio para `cookie_secret`; no reutilices una
    contraseña personal ni la contraseña compartida en un chat.
 5. En `[auth].redirect_uri`, usa exactamente la URL de la app más
@@ -62,6 +66,73 @@ Cada persona usa su propia cuenta Google. Solo las cuentas incluidas en
 
 Los secretos de la aplicación existen solo en la configuración privada de
 Streamlit; la plantilla del repositorio contiene marcadores, no credenciales.
+
+### Formato de los Secrets
+
+En Streamlit Community Cloud, abre [share.streamlit.io](https://share.streamlit.io),
+busca AMS en tu espacio de trabajo, pulsa el menú de tres puntos junto a la app,
+elige **Settings** y abre la pestaña **Secrets**. Alternativamente, desde la app
+pulsa **Manage app**, abre el menú de tres puntos del panel de registros y elige
+**Settings → Secrets**. Pega allí un solo documento TOML con tres secciones. No
+pegues el contenido real de credenciales en GitHub ni en este chat.
+
+El JSON de cuenta de servicio no se pega entero: transforma sus campos al
+formato siguiente. En particular, el valor de `private_key` del JSON ya
+contiene los saltos como `\n`. Para ese campo, copia solo lo que está entre las
+comillas del valor JSON y pégalo entre las comillas de TOML; conserva cada
+`\n` tal como aparece. No copies el nombre `"private_key"`, los dos puntos ni
+la coma final:
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "VALOR project_id DEL JSON"
+private_key_id = "VALOR private_key_id DEL JSON"
+private_key = "-----BEGIN PRIVATE KEY-----\nVALOR COMPLETO private_key DEL JSON\n-----END PRIVATE KEY-----\n"
+client_email = "VALOR client_email DEL JSON"
+client_id = "VALOR client_id DEL JSON"
+auth_uri = "VALOR auth_uri DEL JSON"
+token_uri = "VALOR token_uri DEL JSON"
+auth_provider_x509_cert_url = "VALOR auth_provider_x509_cert_url DEL JSON"
+client_x509_cert_url = "VALOR client_x509_cert_url DEL JSON"
+```
+
+No agregues comillas extra alrededor del valor, no cambies `\n` por una barra
+invertida adicional, y elimina la coma que aparece al final de una propiedad
+JSON. La clave privada es secreta; reemplaza todo el valor de ejemplo por el
+`private_key` completo del JSON. No dejes marcadores como `VALOR ... DEL JSON`.
+
+El documento de Secrets también debe incluir estas secciones, completadas con
+los datos OAuth de la **aplicación web** y con el ID de la hoja:
+
+```toml
+[auth]
+redirect_uri = "https://danp2025-ams-sdd-app-jtgkoq.streamlit.app/oauth2callback"
+cookie_secret = "VALOR ALEATORIO LARGO Y UNICO"
+client_id = "ID DE CLIENTE OAUTH DE LA APLICACION WEB"
+client_secret = "SECRETO OAUTH DE LA APLICACION WEB"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+
+[app]
+google_sheet_id = "ID DE LA HOJA ENTRE /d/ Y /edit"
+authorized_emails = [
+  "correo-google-1@example.com",
+  "correo-google-2@example.com",
+  "correo-google-3@example.com",
+]
+```
+
+En `[auth]`, `client_id` y `client_secret` vienen del cliente OAuth de tipo
+**Aplicación web**, no del JSON de la cuenta de servicio. En
+`[gcp_service_account]`, `client_id` sí viene del JSON de la cuenta de servicio.
+`cookie_secret` debe ser un valor aleatorio largo y único. No compartas estos
+valores con nadie.
+
+Al terminar, el editor de Secrets debe contener las tres secciones: `[auth]`,
+`[app]` y `[gcp_service_account]`. Sustituye todos los textos de ejemplo por
+valores reales válidos antes de guardar. Streamlit lee ese contenido como TOML:
+usa `=` entre nombre y valor, comillas dobles para textos, y corchetes para
+secciones y listas.
 
 ## 5. Comprobar la conexión
 
