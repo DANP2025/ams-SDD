@@ -529,6 +529,10 @@ def _select_all_mbd_players(player_ids: Sequence[str]) -> None:
     st.session_state["mbd_selected_player_ids"] = list(player_ids)
 
 
+def _select_all_swc_players(player_ids: Sequence[str]) -> None:
+    st.session_state["swc_selected_player_ids"] = list(player_ids)
+
+
 def render_dashboard_header() -> None:
     st.markdown(
         """
@@ -732,6 +736,73 @@ def render_dashboard_header() -> None:
             .ams-zscore-table th,
             .ams-zscore-table td {
                 padding: 0.3rem 0.08rem;
+            }
+        }
+        .ams-swc-table-wrap {
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid #d9e2ec;
+            border-radius: 0.75rem;
+        }
+        .ams-swc-table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: 0.68rem;
+        }
+        .ams-swc-table th,
+        .ams-swc-table td {
+            padding: 0.45rem 0.2rem;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+            vertical-align: middle;
+            overflow-wrap: anywhere;
+        }
+        .ams-swc-table thead th {
+            background: #f5f8fc;
+            color: #334155;
+            font-size: 0.64rem;
+            font-weight: 700;
+            line-height: 1.15;
+        }
+        .ams-swc-table .ams-swc-number {
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .ams-swc-table .ams-swc-magnitude {
+            background: #eef2f7;
+            color: #334155;
+            font-weight: 700;
+        }
+        .ams-swc-table .ams-swc-availability {
+            color: #64748b;
+            font-size: 0.62rem;
+        }
+        @media (max-width: 1150px) {
+            .ams-swc-table {
+                font-size: 0.6rem;
+            }
+            .ams-swc-table th,
+            .ams-swc-table td {
+                padding: 0.35rem 0.12rem;
+            }
+            .ams-swc-table .ams-swc-availability {
+                font-size: 0.54rem;
+            }
+        }
+        @media (max-width: 640px) {
+            .ams-swc-table {
+                font-size: 0.52rem;
+            }
+            .ams-swc-table thead th {
+                font-size: 0.5rem;
+            }
+            .ams-swc-table th,
+            .ams-swc-table td {
+                padding: 0.3rem 0.08rem;
+            }
+            .ams-swc-table .ams-swc-availability {
+                font-size: 0.48rem;
             }
         }
         .ams-stat {
@@ -1188,6 +1259,216 @@ def calculate_mbd_hopkins(
             output.append(row)
 
     return pd.DataFrame(output, columns=columns)
+
+
+def classify_swc_magnitude(effect_size: float) -> str:
+    if pd.isna(effect_size):
+        return "No disponible"
+    magnitude = abs(effect_size)
+    if magnitude < 0.2:
+        return "Trivial"
+    if magnitude < 0.6:
+        return "Small"
+    if magnitude < 1.2:
+        return "Moderate"
+    return "Large"
+
+
+def calculate_swc_changes(
+    measurements: pd.DataFrame,
+    selected_player_ids: Sequence[str],
+    category: str,
+    pre_month: pd.Period,
+    post_month: pd.Period,
+) -> pd.DataFrame:
+    columns = [
+        "player_id",
+        "player_name",
+        "source",
+        "metric",
+        "pre_value",
+        "post_value",
+        "change",
+        "reference_n",
+        "reference_sd",
+        "swc",
+        "effect_size",
+        "magnitude",
+        "availability",
+    ]
+    if pre_month == post_month:
+        raise ValueError("Los periodos Pre y Post deben ser diferentes.")
+    if not selected_player_ids:
+        return pd.DataFrame(columns=columns)
+
+    data = measurements.copy()
+    if "source" not in data:
+        data["source"] = "Mediciones"
+    data["player_id"] = data["player_id"].astype("string")
+    data["_month"] = data["date"].dt.to_period("M")
+    relevant = data.loc[
+        data["category"].eq(category)
+        & data["_month"].isin([pre_month, post_month])
+    ]
+    relevant = relevant.loc[
+        ~relevant["metric"].map(is_excluded_display_metric)
+    ]
+    metric_sources = (
+        relevant[["source", "metric"]]
+        .dropna()
+        .drop_duplicates()
+        .sort_values(["source", "metric"])
+    )
+    if metric_sources.empty:
+        return pd.DataFrame(columns=columns)
+
+    reference = relevant.loc[
+        relevant["_month"].eq(pre_month)
+    ].groupby(["source", "metric"])["value"].agg(["count", "std"])
+    player_values = (
+        relevant.loc[relevant["player_id"].isin(selected_player_ids)]
+        .groupby(["source", "player_id", "metric", "_month"], as_index=False)
+        .agg(
+            value=("value", "mean"),
+            player_name=("player_name", "first"),
+        )
+    )
+    value_lookup = {
+        (source, player_id, metric, month): value
+        for source, player_id, metric, month, value in player_values[
+            ["source", "player_id", "metric", "_month", "value"]
+        ].itertuples(index=False, name=None)
+    }
+    name_lookup = (
+        relevant.drop_duplicates("player_id")
+        .set_index("player_id")["player_name"]
+        .to_dict()
+    )
+    output = []
+
+    for player_id in selected_player_ids:
+        player_id = str(player_id)
+        player_name = name_lookup.get(player_id, "Jugador sin nombre")
+        for source, metric in metric_sources.itertuples(index=False, name=None):
+            pre_value = value_lookup.get(
+                (source, player_id, metric, pre_month)
+            )
+            post_value = value_lookup.get(
+                (source, player_id, metric, post_month)
+            )
+            reference_key = (source, metric)
+            if reference_key in reference.index:
+                reference_n = int(reference.loc[reference_key, "count"])
+                reference_sd = float(reference.loc[reference_key, "std"])
+            else:
+                reference_n = 0
+                reference_sd = float("nan")
+
+            row = {
+                "player_id": player_id,
+                "player_name": player_name,
+                "source": source,
+                "metric": metric,
+                "pre_value": pre_value,
+                "post_value": post_value,
+                "change": float("nan"),
+                "reference_n": reference_n,
+                "reference_sd": reference_sd,
+                "swc": float("nan"),
+                "effect_size": float("nan"),
+                "magnitude": "No disponible",
+                "availability": "",
+            }
+            if (
+                pre_value is None
+                or pd.isna(pre_value)
+                or post_value is None
+                or pd.isna(post_value)
+            ):
+                row["availability"] = "Falta una medición Pre o Post."
+            elif reference_n < 2:
+                row["availability"] = (
+                    "Se requieren al menos dos mediciones de referencia en Pre."
+                )
+            elif pd.isna(reference_sd):
+                row["availability"] = (
+                    "La desviación estándar Pre no está disponible."
+                )
+            elif reference_sd == 0:
+                row["availability"] = (
+                    "La desviación estándar de referencia Pre es cero."
+                )
+            else:
+                change = float(post_value - pre_value)
+                effect_size = change / reference_sd
+                row.update(
+                    {
+                        "change": change,
+                        "swc": 0.2 * reference_sd,
+                        "effect_size": effect_size,
+                        "magnitude": classify_swc_magnitude(effect_size),
+                        "availability": "Disponible",
+                    }
+                )
+            output.append(row)
+
+    return pd.DataFrame(output, columns=columns)
+
+
+def build_swc_table_html(results: pd.DataFrame) -> str:
+    if results.empty:
+        return ""
+
+    columns = [
+        ("player_name", "Jugador", "player"),
+        ("source", "Origen", "source"),
+        ("metric", "Variable", "metric"),
+        ("pre_value", "Pre", "number"),
+        ("post_value", "Post", "number"),
+        ("change", "Cambio", "number"),
+        ("swc", "SWC", "number"),
+        ("effect_size", "Efecto", "number"),
+        ("magnitude", "Magnitud", "magnitude"),
+        ("availability", "Disponibilidad", "availability"),
+    ]
+    widths = (16, 9, 14, 6, 6, 7, 7, 7, 10, 18)
+    parts = [
+        '<div class="ams-swc-table-wrap"><table class="ams-swc-table" '
+        'style="width:100%;table-layout:fixed" '
+        'aria-label="Resultados SWC por jugador y variable"><colgroup>'
+    ]
+    parts.extend(
+        f'<col style="width:{width}%">' for width in widths
+    )
+    parts.append("</colgroup><thead><tr>")
+    parts.extend(f"<th>{html.escape(label)}</th>" for _, label, _ in columns)
+    parts.append("</tr></thead><tbody>")
+
+    for row in results.to_dict("records"):
+        parts.append("<tr>")
+        for key, _, cell_type in columns:
+            value = row.get(key)
+            if cell_type == "number":
+                text = "—" if pd.isna(value) else f"{float(value):.1f}"
+                parts.append(f'<td class="ams-swc-number">{text}</td>')
+            elif cell_type == "magnitude":
+                text = html.escape(str(value or "No disponible"))
+                parts.append(f'<td class="ams-swc-magnitude">{text}</td>')
+            elif cell_type == "availability":
+                text = html.escape(str(value or "No disponible"))
+                parts.append(
+                    f'<td class="ams-swc-availability" '
+                    f'title="{html.escape(str(value or ""), quote=True)}">'
+                    f"{text}</td>"
+                )
+            elif cell_type == "source":
+                text = "Plataforma de fuerza" if value == "Plat de fuerza" else value
+                parts.append(f"<td>{html.escape(str(text or '—'))}</td>")
+            else:
+                parts.append(f"<th>{html.escape(str(value or '—'))}</th>")
+        parts.append("</tr>")
+    parts.append("</tbody></table></div>")
+    return "".join(parts)
 
 
 def build_mbd_forest_plot(results: pd.DataFrame) -> go.Figure:
@@ -2288,6 +2569,139 @@ def render_mbd_hopkins_tab(
         )
 
 
+def render_swc_tab(measurements: pd.DataFrame) -> None:
+    st.markdown(
+        '<div class="ams-section-heading">'
+        "SWC — Cambio Mínimo Relevante</div>"
+        '<div class="ams-section-copy">'
+        "Compara mediciones Pre y Post usando como referencia la desviación "
+        "estándar muestral del grupo en Pre."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    if measurements.empty:
+        st.warning("No hay mediciones válidas disponibles para el análisis SWC.")
+        return
+
+    categories = sorted(measurements["category"].dropna().astype(str).unique())
+    if not categories:
+        st.warning("No hay categorías disponibles para analizar.")
+        return
+
+    with st.container(border=True):
+        filter_columns = st.columns([1.05, 1.8, 0.55, 1, 1], gap="small")
+        with filter_columns[0]:
+            category = st.selectbox(
+                "Categoría", categories, key="swc_category"
+            )
+        category_data = measurements.loc[
+            measurements["category"].astype(str).eq(category)
+        ]
+        periods = sorted(
+            category_data["date"].dt.to_period("M").dropna().unique()
+        )
+        if len(periods) < 2:
+            st.warning(
+                "Se necesitan al menos dos periodos mensuales con mediciones "
+                "en esta categoría."
+            )
+            return
+
+        for key, default_period in (
+            ("swc_pre_month", periods[-2]),
+            ("swc_post_month", periods[-1]),
+        ):
+            if st.session_state.get(key) not in periods:
+                st.session_state[key] = default_period
+
+        pre_month = st.session_state["swc_pre_month"]
+        post_month = st.session_state["swc_post_month"]
+        period_data = category_data.loc[
+            category_data["date"].dt.to_period("M").isin(
+                [pre_month, post_month]
+            )
+        ]
+        player_options = (
+            period_data[["player_id", "player_name"]]
+            .drop_duplicates("player_id")
+            .sort_values("player_name")
+        )
+        player_ids = player_options["player_id"].astype(str).tolist()
+        player_names = dict(
+            zip(player_ids, player_options["player_name"].astype(str))
+        )
+        current_selection = st.session_state.get(
+            "swc_selected_player_ids", []
+        )
+        st.session_state["swc_selected_player_ids"] = [
+            player_id
+            for player_id in current_selection
+            if player_id in player_ids
+        ]
+        with filter_columns[1]:
+            selected_player_ids = st.multiselect(
+                "Jugadores",
+                player_ids,
+                format_func=lambda player_id: player_names.get(
+                    player_id, str(player_id)
+                ),
+                key="swc_selected_player_ids",
+                placeholder="Selecciona uno o varios jugadores",
+            )
+        with filter_columns[2]:
+            st.caption(" ")
+            st.button(
+                "Todos",
+                key="swc_select_all_players",
+                help="Seleccionar todos los jugadores de esta categoría.",
+                on_click=_select_all_swc_players,
+                args=(player_ids,),
+                use_container_width=True,
+            )
+        with filter_columns[3]:
+            pre_month = st.selectbox(
+                "Mes Pre",
+                periods,
+                format_func=lambda period: period.strftime("%Y-%m"),
+                key="swc_pre_month",
+            )
+        with filter_columns[4]:
+            post_month = st.selectbox(
+                "Mes Post",
+                periods,
+                format_func=lambda period: period.strftime("%Y-%m"),
+                key="swc_post_month",
+            )
+
+    if pre_month == post_month:
+        st.warning("Selecciona meses distintos para los periodos Pre y Post.")
+        return
+    if not selected_player_ids:
+        st.info("Selecciona uno o varios jugadores para comparar.")
+        return
+
+    results = calculate_swc_changes(
+        measurements,
+        selected_player_ids,
+        category,
+        pre_month,
+        post_month,
+    )
+    if results.empty:
+        st.info("No hay variables compartidas entre los periodos seleccionados.")
+        return
+
+    st.caption(
+        "Las magnitudes Trivial / Small / Moderate / Large describen el tamaño "
+        "del cambio, no si fue beneficioso o perjudicial. Son umbrales "
+        "convencionales y deben revisarse según la población, variable y protocolo."
+    )
+    st.markdown(
+        build_swc_table_html(results),
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="AMS", layout="wide")
     try:
@@ -2497,7 +2911,6 @@ def main() -> None:
                             "</div>",
                             unsafe_allow_html=True,
                         )
-                        table = build_z_score_matrix(results)
                         st.caption(
                             "Los colores muestran el Z-Score frente a la categoría "
                             "de referencia. Un resultado positivo no significa "
@@ -2605,7 +3018,7 @@ def main() -> None:
         render_mbd_hopkins_tab(measurements, data_diagnostics)
 
     with swc_tab:
-        st.info("SWC: Próximamente.")
+        render_swc_tab(measurements)
 
 
 if __name__ == "__main__":

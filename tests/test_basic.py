@@ -10,12 +10,15 @@ from app import (
     build_z_score_matrix_html,
     build_z_score_radar,
     calculate_mbd_hopkins,
+    calculate_swc_changes,
     calculate_z_scores,
+    build_swc_table_html,
     summarize_mbd_changes,
     build_mbd_player_matrix_html,
     canonicalize_headers,
     classify_mbd_clarity,
     classify_mbd_certainty,
+    classify_swc_magnitude,
     classify_z_score,
     lookup_mbd_direction,
     missing_secret_settings,
@@ -26,6 +29,156 @@ from app import (
     z_score_color,
     z_score_cell_style,
 )
+
+
+@pytest.mark.parametrize(
+    ("effect_size", "expected"),
+    [
+        (0.1999, "Trivial"),
+        (0.2, "Small"),
+        (0.5999, "Small"),
+        (0.6, "Moderate"),
+        (1.1999, "Moderate"),
+        (1.2, "Large"),
+        (-0.2, "Small"),
+        (-1.2, "Large"),
+    ],
+)
+def test_swc_magnitude_uses_absolute_hopkins_boundaries(
+    effect_size, expected
+):
+    assert classify_swc_magnitude(effect_size) == expected
+
+
+def test_swc_calculates_change_using_sample_pre_group_sd():
+    measurements = pd.DataFrame(
+        [
+            ["p1", "Ana Uno", "2026-01-10", "U18", "Sprint", 10.0],
+            ["p2", "Beto Dos", "2026-01-10", "U18", "Sprint", 12.0],
+            ["p3", "Caro Tres", "2026-01-10", "U18", "Sprint", 14.0],
+            ["p1", "Ana Uno", "2026-02-10", "U18", "Sprint", 12.4],
+            ["p2", "Beto Dos", "2026-02-10", "U18", "Sprint", 9.6],
+        ],
+        columns=[
+            "player_id",
+            "player_name",
+            "date",
+            "category",
+            "metric",
+            "value",
+        ],
+    )
+    measurements["date"] = pd.to_datetime(measurements["date"])
+
+    results = calculate_swc_changes(
+        measurements,
+        ["p1", "p2"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+    ).set_index("player_id")
+
+    assert results.loc["p1", "reference_n"] == 3
+    assert results.loc["p1", "reference_sd"] == pytest.approx(2.0)
+    assert results.loc["p1", "swc"] == pytest.approx(0.4)
+    assert results.loc["p1", "change"] == pytest.approx(2.4)
+    assert results.loc["p1", "effect_size"] == pytest.approx(1.2)
+    assert results.loc["p1", "magnitude"] == "Large"
+    assert results.loc["p1", "availability"] == "Disponible"
+    assert results.loc["p2", "change"] == pytest.approx(-2.4)
+    assert results.loc["p2", "effect_size"] == pytest.approx(-1.2)
+    assert results.loc["p2", "magnitude"] == "Large"
+
+
+def test_swc_marks_missing_or_invalid_reference_as_unavailable():
+    rows = [
+        ["p1", "Ana Uno", "2026-01-10", "U18", "Insuficiente", 5.0],
+        ["p1", "Ana Uno", "2026-02-10", "U18", "Insuficiente", 7.0],
+        ["p1", "Ana Uno", "2026-01-10", "U18", "Constante", 5.0],
+        ["p2", "Beto Dos", "2026-01-10", "U18", "Constante", 5.0],
+        ["p1", "Ana Uno", "2026-02-10", "U18", "Constante", 6.0],
+        ["p1", "Ana Uno", "2026-01-10", "U18", "Post faltante", 5.0],
+        ["p2", "Beto Dos", "2026-01-10", "U18", "Post faltante", 7.0],
+        ["p2", "Beto Dos", "2026-02-10", "U18", "Post faltante", 8.0],
+        ["p2", "Beto Dos", "2026-01-10", "U18", "Pre faltante", 8.0],
+        ["p3", "Caro Tres", "2026-01-10", "U18", "Pre faltante", 10.0],
+        ["p1", "Ana Uno", "2026-02-10", "U18", "Pre faltante", 12.0],
+    ]
+    measurements = pd.DataFrame(
+        rows,
+        columns=[
+            "player_id",
+            "player_name",
+            "date",
+            "category",
+            "metric",
+            "value",
+        ],
+    )
+    measurements["date"] = pd.to_datetime(measurements["date"])
+
+    results = calculate_swc_changes(
+        measurements,
+        ["p1"],
+        "U18",
+        pd.Period("2026-01", freq="M"),
+        pd.Period("2026-02", freq="M"),
+    ).set_index("metric")
+
+    assert results.loc["Insuficiente", "reference_n"] == 1
+    assert pd.isna(results.loc["Insuficiente", "effect_size"])
+    assert results.loc["Insuficiente", "availability"] != "Disponible"
+    assert results.loc["Constante", "reference_sd"] == 0
+    assert results.loc["Constante", "magnitude"] == "No disponible"
+    assert results.loc["Constante", "availability"] != "Disponible"
+    assert pd.isna(results.loc["Post faltante", "post_value"])
+    assert pd.isna(results.loc["Post faltante", "change"])
+    assert results.loc["Post faltante", "availability"] != "Disponible"
+    assert pd.isna(results.loc["Pre faltante", "pre_value"])
+    assert pd.isna(results.loc["Pre faltante", "change"])
+    assert results.loc["Pre faltante", "availability"] != "Disponible"
+
+
+def test_swc_rejects_identical_pre_and_post_periods():
+    measurements = pd.DataFrame(
+        columns=["player_id", "player_name", "date", "category", "metric", "value"]
+    )
+
+    with pytest.raises(ValueError, match="diferentes"):
+        calculate_swc_changes(
+            measurements,
+            ["p1"],
+            "U18",
+            pd.Period("2026-01", freq="M"),
+            pd.Period("2026-01", freq="M"),
+        )
+
+
+def test_swc_table_html_keeps_magnitude_neutral_and_player_names_visible():
+    results = pd.DataFrame(
+        [
+            {
+                "player_name": "Ana Maria Gonzalez",
+                "source": "Rendimiento",
+                "metric": "Sprint",
+                "pre_value": 10.0,
+                "post_value": 12.4,
+                "change": 2.4,
+                "swc": 0.4,
+                "effect_size": 1.2,
+                "magnitude": "Large",
+                "availability": "Disponible",
+            }
+        ]
+    )
+
+    table = build_swc_table_html(results)
+
+    assert 'class="ams-swc-table-wrap"' in table
+    assert 'style="width:100%;table-layout:fixed"' in table
+    assert "Ana Maria Gonzalez" in table
+    assert "Large" in table
+    assert "Beneficioso" not in table and "Perjudicial" not in table
 
 
 def test_mbd_hopkins_calculates_change_uncertainty_and_neutral_probabilities():

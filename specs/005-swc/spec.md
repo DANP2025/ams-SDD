@@ -21,10 +21,10 @@
 
 ## Criterios de aceptación
 
-- [ ] Los periodos Pre y Post se seleccionan explícitamente.
-- [ ] La desviación de referencia procede de la categoría seleccionada en Pre y es muestral (`ddof = 1`).
-- [ ] El cambio, SWC y tamaño estandarizado coinciden con las fórmulas especificadas.
-- [ ] Las fronteras `0.2`, `0.6` y `1.2` producen, respectivamente, Small, Moderate y Large al alcanzar el umbral.
-- [ ] La clasificación usa la magnitud absoluta, mientras el signo permanece visible por separado.
-- [ ] Valores faltantes, muestra insuficiente o desviación cero se muestran como no disponibles.
-- [ ] La interfaz distingue magnitud de beneficio/perjuicio y presenta la cautela contextual.
+- [x] Los periodos Pre y Post se seleccionan explícitamente.
+- [x] La desviación de referencia procede de la categoría seleccionada en Pre y es muestral (`ddof = 1`).
+- [x] El cambio, SWC y tamaño estandarizado coinciden con las fórmulas especificadas.
+- [x] Las fronteras `0.2`, `0.6` y `1.2` producen, respectivamente, Small, Moderate y Large al alcanzar el umbral.
+- [x] La clasificación usa la magnitud absoluta, mientras el signo permanece visible por separado.
+- [x] Valores faltantes, muestra insuficiente o desviación cero se muestran como no disponibles.
+- [x] La interfaz distingue magnitud de beneficio/perjuicio y presenta la cautela contextual.
