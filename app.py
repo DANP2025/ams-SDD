@@ -1551,6 +1551,8 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
         st.info("No hay variables compartidas entre los periodos seleccionados.")
         return
 
+    if st.session_state.get("mbd_forest_player_id") not in selected_player_ids:
+        st.session_state["mbd_forest_player_id"] = selected_player_ids[0]
     forest_player_id = st.selectbox(
         "Ver Forest Plot de",
         selected_player_ids,
@@ -1606,7 +1608,7 @@ def render_mbd_hopkins_tab(measurements: pd.DataFrame) -> None:
         st.dataframe(
             styled_matrix,
             use_container_width=True,
-            height=min(620, max(155, 78 + 62 * len(matrix))),
+            height=min(620, max(155, 74 + 46 * len(matrix))),
         )
 
     forest_results = results.loc[
